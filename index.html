@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f5f7">
+  <meta name="color-scheme" content="light dark">
+  <title>Магазин</title>
+  <script src="https://telegram.org/js/telegram-web-app.js?v=26"></script>
+  <link rel="stylesheet" href="styles.css?v=26">
+</head>
+<body data-tab="catalog">
+  <a class="skip" href="#view">К содержимому</a>
+
+  <!-- Навбар: компактный заголовок появляется, когда большой уезжает под него -->
+  <header class="nav" id="nav">
+    <div class="nav-inner">
+      <div class="nav-side"><button class="nav-btn" id="navBack" hidden><svg viewBox="0 0 12 20" aria-hidden="true"><path d="M10 2 2 10l8 8"/></svg><span id="navBackText">Назад</span></button></div>
+      <div class="nav-title" id="navTitle" aria-hidden="true"></div>
+      <div class="nav-side right" id="navRight"></div>
+    </div>
+  </header>
+
+  <div class="head" id="head">
+    <div class="wrap">
+      <h1 class="large-title" id="largeTitle">&nbsp;</h1>
+      <p class="large-sub" id="largeSub"></p>
+    </div>
+  </div>
+
+  <div class="searchbar" id="searchbar">
+    <div class="wrap">
+      <div class="search-row">
+        <label class="search">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="q" type="search" placeholder="Поиск: 17 про макс, AirPods…" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search" aria-label="Поиск по каталогу">
+          <button type="button" class="clear" id="qClear" aria-label="Очистить поиск" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="9"/><path d="m7 7 6 6m0-6-6 6"/></svg></button>
+        </label>
+        <button type="button" class="cancel" id="qCancel">Отменить</button>
+      </div>
+      <nav class="cats" id="cats" data-thumb="cats" data-thumb-inset="6 0" aria-label="Разделы каталога"></nav>
+    </div>
+  </div>
+
+  <main id="view" class="wrap" tabindex="-1"></main>
+
+  <nav class="tabbar" id="tabbar" data-thumb="tabs" data-thumb-inset="3 8" aria-label="Разделы">
+    <button data-tab="catalog" class="active" aria-current="page">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg>
+      <span>Каталог</span>
+    </button>
+    <button data-tab="fav">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10Z"/></svg>
+      <span>Избранное</span>
+    </button>
+    <button data-tab="cart">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8.5h14l-1.2 11.5H6.2z"/><path d="M8.5 8.5V7a3.5 3.5 0 0 1 7 0v1.5"/></svg>
+      <span>Корзина</span><b class="badge" id="cartCount" aria-hidden="true"></b>
+    </button>
+    <button data-tab="orders">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h12v17l-3-2-3 2-3-2-3 2z"/><path d="M9 8.5h6M9 12h6"/></svg>
+      <span>Заказы</span>
+    </button>
+  </nav>
+
+  <div class="scrim" id="scrim"></div>
+  <section class="sheet" id="sheet" role="dialog" aria-modal="true" tabindex="-1"></section>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="config.js?v=26"></script>
+  <script src="art.js?v=26"></script>
+  <script src="motion.js?v=26"></script>
+  <script src="app.js?v=26"></script>
+</body>
+</html>
