@@ -542,15 +542,17 @@ main { padding-bottom: calc(var(--tab-h) + var(--safe-bottom) + 40px); }
 .instant, .instant::before, .instant::after { transition: none !important; }
 
 /* цифровой барабан */
-/* Цифры цены во время прокрутки — NumberFlow (vendor/number-flow.mjs): колёса цифр с маской сверху/снизу */
-number-flow { font-variant-numeric: tabular-nums; --number-flow-mask-height: .2em; --number-flow-mask-width: .4em;
-  /* Маска NumberFlow собрана из round()/многослойных -webkit-mask — в WebView Telegram на iOS она не применяется,
-     и колёса цифр видны целиком. Жёсткая обрезка по строке работает везде; по горизонтали оставляем запас,
-     чтобы не резать появляющиеся разряды. translateZ — отдельный слой, чтобы обрезались и анимируемые цифры. */
-  clip-path: inset(0 -0.6em); -webkit-clip-path: inset(0 -0.6em); transform: translateZ(0);
-  /* своё мягкое затухание сверху/снизу: один линейный градиент iOS понимает всегда */
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16%, #000 84%, transparent 100%);
-  mask-image: linear-gradient(to bottom, transparent 0, #000 16%, #000 84%, transparent 100%); }
+/* Одометр цены (motion.js roll): окно каждой цифры обрезает ленту обычным overflow — работает и в WebView iOS.
+   .odo-g — невидимая итоговая цифра, держит ширину; .odo-s — лента, едет 2D-сдвигом. */
+.odo { display: inline-flex; white-space: nowrap; vertical-align: top; }
+.odo > span { margin-right: var(--ls, 0); }
+.odo, .odo span { font-size: inherit !important; font-weight: inherit !important; color: inherit !important; letter-spacing: 0; }
+.odo-d { position: relative; display: inline-block; overflow: hidden; vertical-align: top; }
+.odo-g { display: block; text-align: center; }
+.odo-d.spin .odo-g { visibility: hidden; }
+.odo-s { position: absolute; left: 0; right: 0; top: 0; display: flex; flex-direction: column; text-align: center; will-change: transform; }
+.odo-s > span { display: block; }
+.odo-new { animation: fade-in var(--dur-2) var(--spring-smooth); }
 
 /* общий элемент «плитка → герой» и полёт в корзину */
 .morph { position: fixed; inset: 0; z-index: 55; pointer-events: none; contain: layout style; }
