@@ -116,12 +116,12 @@
     tap(k = "light") { if (tgAt("6.1")) try { tg.HapticFeedback.impactOccurred(k); } catch {} },
     note(t) { if (tgAt("6.1")) try { tg.HapticFeedback.notificationOccurred(t); } catch {} },
   };
-  // барабан цены щёлкает на каждой цифре: в Telegram — selectionChanged, в браузере Android — короткая вибрация
+  // прокрутка цифр цены: лёгкие щелчки во время прокрутки и мягкий «стук», когда цифры встали на место
   M.onTick = () => {
     if (inTelegram) hap.sel();
-    // вибрация в браузере разрешена только после жеста пользователя — иначе Chrome сыплет предупреждениями
-    else if (navigator.vibrate && matchMedia("(pointer: coarse)").matches && navigator.userActivation?.hasBeenActive) try { navigator.vibrate(3); } catch {}
+    else if (navigator.vibrate && matchMedia("(pointer: coarse)").matches && navigator.userActivation?.hasBeenActive) try { navigator.vibrate(4); } catch {}
   };
+  M.onSettle = () => { if (inTelegram) hap.tap("soft"); };
   const ICON = {
     x: `<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 1l10 10M11 1 1 11"/></svg>`,
     chat: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4c4.7 0 8.5 3.1 8.5 7s-3.8 7-8.5 7c-.9 0-1.8-.1-2.6-.3L5 19.5l1.2-3.4C4.6 14.8 3.5 13 3.5 11c0-3.9 3.8-7 8.5-7Z"/></svg>`,
@@ -1092,7 +1092,7 @@
       <div class="summary">
         <div class="sum-row"><span>Товары (${count})</span><span data-roll="sub">${money(total)}</span></div>
         <div class="sum-row"><span>Получение</span><span>самовывоз или доставка</span></div>
-        <div class="sum-total"><span>Итого</span><b data-roll="total">${money(total)}</b></div>
+        <div class="sum-total"><span>Итого</span><b data-roll="total" data-haptic>${money(total)}</b></div>
         ${eq ? `<div class="sum-eq"><span>${rateCaption()}</span><span data-roll="total-eq">${eq}</span></div>` : ""}
       </div>
       <p class="cart-note">Оплата при получении. Менеджер подтвердит наличие и детали.</p>
@@ -1532,7 +1532,7 @@
       <div class="p-body">
         <div class="p-cat">${esc(it.category)}${p.condNote !== "Новый" ? ` · ${esc(p.condNote)}` : ""}</div>
         <h2 class="p-name" id="sheetTitle">${esc(p.title)} <span class="flags">${p.flags}</span></h2>
-        <div class="p-price"><b data-roll="p-price">${money(it.price)}</b>${d < 0 ? `<s aria-label="Было ${money(it.prev_price)}">${money(it.prev_price)}</s>` : ""}${deltaTag(it)}</div>
+        <div class="p-price"><b data-roll="p-price" data-haptic>${money(it.price)}</b>${d < 0 ? `<s aria-label="Было ${money(it.prev_price)}">${money(it.prev_price)}</s>` : ""}${deltaTag(it)}</div>
         ${eq ? `<div class="p-eq"><span data-roll="p-eq">${eq}</span><small>${rateCaption()}</small></div>` : ""}
         <div class="p-avail ${inStock(it) ? "" : "wait"}">${esc(statusText(it))}</div>
         ${variantsHTML(it)}

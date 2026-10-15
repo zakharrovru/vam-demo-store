@@ -542,20 +542,8 @@ main { padding-bottom: calc(var(--tab-h) + var(--safe-bottom) + 40px); }
 .instant, .instant::before, .instant::after { transition: none !important; }
 
 /* цифровой барабан */
-/* Цифровой барабан цены — как колёса пикера в «Будильнике» iOS.
-   .odo-g — неподвижная цифра (держит ширину и видна в покое), .odo-w — цилиндр из 5 ячеек на время прокрутки;
-   ячейкам motion.js задаёт translateY/rotateX/opacity каждый кадр. */
-.odo { display: inline-flex; white-space: nowrap; vertical-align: top; }
-.odo-d { position: relative; display: inline-block; vertical-align: top; }
-.odo-g { display: block; text-align: center; }
-.odo-w { position: absolute; left: -2px; right: -2px; display: none; perspective: 240px; transform-style: preserve-3d; pointer-events: none;
-  -webkit-mask-image: linear-gradient(transparent, #000 25%, #000 75%, transparent); mask-image: linear-gradient(transparent, #000 25%, #000 75%, transparent); }
-.odo-w > span { position: absolute; left: 0; right: 0; top: 0; text-align: center; backface-visibility: hidden; will-change: transform, opacity; }
-.odo-d.spin .odo-w { display: block; }
-.odo-d.spin .odo-g { visibility: hidden; }
-.odo, .odo span { font-size: inherit !important; font-weight: inherit !important; color: inherit !important; letter-spacing: 0; }
-.odo > span { margin-right: var(--ls, 0); }
-.odo-new { animation: fade-in var(--dur-2) var(--spring-smooth); }
+/* Цифры цены во время прокрутки — NumberFlow (vendor/number-flow.mjs): колёса цифр с маской сверху/снизу */
+number-flow { font-variant-numeric: tabular-nums; --number-flow-mask-height: .22em; --number-flow-mask-width: .4em; }
 
 /* общий элемент «плитка → герой» и полёт в корзину */
 .morph { position: fixed; inset: 0; z-index: 55; pointer-events: none; contain: layout style; }

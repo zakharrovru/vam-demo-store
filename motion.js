@@ -147,109 +147,75 @@ window.Motion = (() => {
     list.forEach((c) => glide(c, prev && prev.get(c.dataset.thumb)));
   }
 
-  // ---------- цифровой барабан как пикер «Будильника» iOS ----------
-  // Каждая цифра — цилиндр: прокручивается через промежуточные значения с перспективой,
-  // соседние цифры видны и гаснут сверху/снизу, на каждом «зубце» — щелчок (onTick → haptic).
-  const isDigit = (ch) => ch >= "0" && ch <= "9";
-  const numOf = (s) => +String(s).replace(/\D/g, "") || 0;
-  // текст элемента без барабанов незавершённой прокрутки (иначе быстрый повторный клик крутит от мусора)
-  const rollText = (el) => { const v = el.querySelector(":scope > .vh"); return v && el.querySelector(":scope > .odo") ? v.textContent : el.textContent; };
-  const WHEEL_CELLS = 5;                 // видимые ячейки цилиндра: центр ± 2
-  const easeOutQuint = (t) => 1 - Math.pow(1 - t, 5);
-  // «зубчатость»: позиция слегка задерживается у каждой цифры — ощущение щелчков, как у колёсика
-  const detent = (p) => p - Math.sin(2 * Math.PI * p) / (2 * Math.PI) * 0.35;
-  let lastTick = 0;
-  function tick() {
-    const now = performance.now();
-    if (now - lastTick < 28) return;     // не чаще ~35 щелчков/с на все барабаны сразу
-    lastTick = now;
-    try { api.onTick && api.onTick(); } catch {}
+  // ---------- цифры цены: NumberFlow (github.com/barvian/number-flow, vendor/number-flow.mjs) ----------
+  // Каждая цифра прокручивается как колесо пикера iOS, плагин continuous проводит её через все промежуточные
+  // значения; ширина строки анимируется самой библиотекой. Щелчки виброотклика идут по расписанию,
+  // синхронно с прокруткой: частые вызовы iOS склеивает и отбрасывает, поэтому интервал ≥ 50 мс.
+  const NF_SPIN = 900;                                    // длительность прокрутки, мс
+  const NF_EASE = "linear(0, 0.0068, 0.0262 1.2%, 0.0997 2.5%, 0.2213 3.9%, 0.4089 5.8%, 0.6007 8%, 0.7392 10%, 0.8506 12.3%, 0.9263 14.6%, 0.9752 17%, 1.0035 19.6%, 1.0141 22.6%, 1.0124 26.4%, 1.0035 32.4%, 0.9993 41.4%, 1)";
+  const rollText = (el) => (el._nfTo != null ? el._nfTo : el.textContent);
+  // «$1 489» → {prefix:"$", n:1489, suffix:"", sep}; null, если это не одно число
+  function parseMoney(s) {
+    const m = /^([^\d]*?)(\d[\d\s  ]*\d|\d)([^\d]*)$/.exec(String(s));
+    if (!m) return null;
+    const sep = (/[\s  ]/.exec(m[2]) || [""])[0];
+    return { prefix: m[1], n: +m[2].replace(/\D/g, ""), suffix: m[3], sep };
+  }
+  let nfLib = null;
+  const nfReady = () => (nfLib = nfLib || window.NumberFlowLib || null) && customElements.get("number-flow") && nfLib.canAnimate;
+
+  // расписание щелчков: чаще в начале, реже к концу — как колесо после свайпа
+  function tickSchedule(steps) {
+    const n = Math.max(8, Math.min(18, steps * 2));       // «много маленьких толчков», но не чаще 20 в секунду
+    const at = [];
+    let last = -Infinity;
+    for (let i = 1; i <= n; i++) {
+      const t = 1 - Math.pow(1 - i / (n + 1), 2.2);     // обратная ease-out: интервалы растут
+      const ms = Math.round(t * NF_SPIN * 0.85);
+      if (ms - last >= 48) { at.push(ms); last = ms; }
+    }
+    return at;
+  }
+  function playTicks(el, steps) {
+    (el._nfTicks || []).forEach(clearTimeout);
+    el._nfTicks = tickSchedule(steps).map((ms) => setTimeout(() => { try { api.onTick && api.onTick(); } catch {} }, ms));
+    el._nfTicks.push(setTimeout(() => { try { api.onSettle && api.onSettle(); } catch {} }, NF_SPIN * 0.9));
   }
 
   function roll(el, to, from) {
     if (!el) return;
-    if (el._rollRaf) cancelAnimationFrame(el._rollRaf);
-    clearTimeout(el._rollT);
     from = from ?? rollText(el);
-    if (from === to || reduced() || !from || !/\d/.test(to)) { el.textContent = to; return; }
-    const cs = getComputedStyle(el);
-    let lh = parseFloat(cs.lineHeight);
-    if (!lh) lh = parseFloat(cs.fontSize) * 1.2;
-    const dir = numOf(to) >= numOf(from) ? 1 : -1;  // дороже — цифры уходят вверх, дешевле — вниз
-    const a = [...from], b = [...to];
-    const n = b.length;
-    let html = "";
-    const cols = [];
-    let firstChanged = -1;
-    for (let i = 0; i < n; i++) {
-      const old = a[a.length - (n - i)];
-      if (isDigit(b[i]) && old !== b[i]) { firstChanged = i; break; }
+    const A = parseMoney(from), B = parseMoney(to);
+    if (from === to || reduced() || !A || !B || A.prefix !== B.prefix || A.suffix !== B.suffix || !nfReady()) {
+      el._nfTo = null; el.textContent = to; return;
     }
-    for (let i = 0; i < n; i++) {
-      const ch = b[i], old = a[a.length - (n - i)];
-      if (!isDigit(ch)) { html += `<span class="odo-c">${ch === " " ? "&nbsp;" : ch}</span>`; continue; }
-      const t = +ch, o = old && isDigit(old) ? +old : null;
-      const k = [...b.slice(i)].filter(isDigit).length;     // позиция справа: 1 — единицы
-      // младшие разряды крутятся сильнее (как при быстром пролистывании), старшие — ровно до цели
-      const spinning = firstChanged >= 0 && i >= firstChanged;
-      const turns = !spinning ? 0 : k === 1 ? 2 : k === 2 ? 1 : 0;
-      const base = o ?? t;
-      let dist = dir > 0 ? (t - base + 10) % 10 : (base - t + 10) % 10;
-      if (spinning) dist += 10 * turns;
-      if (o === null) dist = 0;
-      const cells = Array.from({ length: WHEEL_CELLS }, () => "<span></span>").join("");
-      html += `<span class="odo-d${o === null ? " odo-new" : ""}" style="height:${lh}px"><span class="odo-w" style="height:${lh * 1.7}px;top:${-lh * .35}px">${cells}</span><span class="odo-g">${ch}</span></span>`;
-      cols.push({ start: base, dist, dir, k, last: null });
+    clearTimeout(el._nfDone);
+    let nf = el.querySelector(":scope > number-flow");
+    if (!nf) {
+      nf = document.createElement("number-flow");
+      nf.locales = B.sep === " " ? "fr-FR" : "ru-RU";
+      nf.format = { useGrouping: true, maximumFractionDigits: 0 };
+      nf.numberPrefix = B.prefix;
+      nf.numberSuffix = B.suffix;
+      nf.plugins = [nfLib.continuous];
+      nf.spinTiming = { duration: NF_SPIN, easing: NF_EASE };
+      nf.transformTiming = { duration: 700, easing: NF_EASE };
+      nf.opacityTiming = { duration: 350, easing: "ease-out" };
+      el.textContent = "";
+      el.append(nf);
+      nf.update(A.n);                                   // первое значение — без анимации
     }
-    // letter-spacing переносим в отступы: внутри flex-барабана он теряется и строка «прыгала» на ~1 px на символ
-    const ls = parseFloat(cs.letterSpacing) || 0;
-    el.innerHTML = `<span class="vh">${to}</span><span class="odo" aria-hidden="true" style="line-height:${lh}px;--ls:${ls}px">${html}</span>`;
-    const nodes = [...el.querySelectorAll(".odo-d")];
-    cols.forEach((c, i) => {
-      c.node = nodes[i];
-      c.cells = [...nodes[i].querySelectorAll(".odo-w > span")];
-      // длительность растёт с числом цифр, которые надо пролистать; лёгкий разнос по разрядам
-      c.dur = c.dist ? 520 + Math.min(c.dist, 32) * 26 : 0;
-      c.delay = (c.k - 1) * 18;
-    });
-    // окно цилиндра выступает за строку лишь на треть высоты — соседние цифры только «выглядывают»,
-    // не наезжая на заголовок и строку «≈ ₽»
-    const R = lh * .9;                        // радиус цилиндра
-    const wheelTop = lh * .35;          // центр окна цилиндра
-    const draw = (c, pos) => {
-      const center = Math.round(pos);
-      c.cells.forEach((cell, j) => {
-        const idx = center + j - 2;           // ячейки: центр-2 … центр+2
-        const d = idx - pos;                  // смещение от центра в ячейках
-        const ang = d * 0.42;                 // ~24° на ячейку
-        if (Math.abs(ang) > 1.45) { cell.style.opacity = "0"; return; }
-        cell.textContent = String(((idx % 10) + 10) % 10);
-        cell.style.transform = `translateY(${wheelTop + Math.sin(ang) * R}px) rotateX(${-ang}rad) scaleY(${Math.max(.35, Math.cos(ang))})`;
-        cell.style.opacity = String(Math.max(0, Math.cos(ang) ** 4));
-      });
-      if (c.last !== null && center !== c.last) tick();
-      c.last = center;
-    };
-    const t0 = performance.now();
-    const maxEnd = Math.max(0, ...cols.map((c) => c.delay + c.dur));
-    cols.forEach((c) => { if (c.dist) { c.node.classList.add("spin"); draw(c, c.start); } });
-    const frame = (now) => {
-      let busy = false;
-      cols.forEach((c) => {
-        if (!c.dist || c.done) return;
-        const t = Math.min(1, Math.max(0, (now - t0 - c.delay) / c.dur));
-        const p = detent(easeOutQuint(t) * c.dist);
-        draw(c, c.start + c.dir * p);
-        if (t >= 1) { c.done = true; c.node.classList.remove("spin"); }
-        else busy = true;
-      });
-      if (busy && now - t0 < maxEnd + 200) el._rollRaf = requestAnimationFrame(frame);
-      else finish();
-    };
-    const finish = () => { cancelAnimationFrame(el._rollRaf); clearTimeout(el._rollT); el._rollRaf = 0; el.textContent = to; };
-    el._rollRaf = requestAnimationFrame(frame);
-    // страховка: если кадры не идут (вкладка/Telegram свёрнуты), цена всё равно встанет в итоговое значение
-    el._rollT = setTimeout(finish, maxEnd + 400);
+    el._nfTo = to;
+    // щелчки только у «главных» цен (data-haptic), чтобы несколько строк не трещали одновременно
+    if (el.hasAttribute("data-haptic")) {
+      const da = String(A.n), db = String(B.n);
+      let steps = Math.abs(da.length - db.length) * 3;
+      for (let i = 0; i < Math.max(da.length, db.length); i++) steps += Math.abs((+da[da.length - 1 - i] || 0) - (+db[db.length - 1 - i] || 0));
+      playTicks(el, steps);
+    }
+    requestAnimationFrame(() => nf.update(B.n));
+    // после прокрутки возвращаем обычный текст (точное совпадение с разметкой и доступность)
+    el._nfDone = setTimeout(() => { if (el._nfTo === to) { el._nfTo = null; el.textContent = to; } }, NF_SPIN + 250);
   }
   const captureRolls = (root) => {
     const m = new Map();
@@ -448,6 +414,6 @@ window.Motion = (() => {
   }
 
   // onTick — приложение подставляет щелчок виброотклика (Telegram HapticFeedback.selectionChanged)
-  const api = { reduced, spring, rubber, morph, glide, thumbs, captureThumbs, roll, captureRolls, applyRolls, fly, pulse, parallax, ambient, reveal, tilt, heroSwap, replay, clamp, lerp, hasView, onTick: null };
+  const api = { reduced, spring, rubber, morph, glide, thumbs, captureThumbs, roll, captureRolls, applyRolls, fly, pulse, parallax, ambient, reveal, tilt, heroSwap, replay, clamp, lerp, hasView, onTick: null, onSettle: null };
   return api;
 })();
