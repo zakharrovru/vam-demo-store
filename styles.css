@@ -157,7 +157,8 @@ body:not([data-tab="catalog"]) .searchbar { display: none; }
 .cat.active::before { background: var(--ink); }
 .cats.has-thumb .cat.active::before { background: transparent; }
 .cats > .thumb { background: var(--ink); border-radius: 999px; }
-.cat-all { color: var(--link); }
+.cat-all { display: inline-flex; align-items: center; gap: 6px; color: var(--link); }
+.cat-all svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; }
 
 main { padding-bottom: calc(var(--tab-h) + var(--safe-bottom) + 40px); }
 

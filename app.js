@@ -904,9 +904,11 @@
     const bar = $("#cats");
     const prev = M.captureThumbs(bar);
     const act = activeGroup();
-    const names = ["Все", ...state.groups.map((g) => g.name)];
-    bar.innerHTML = names.map((g) => `<button class="cat ${g === act ? "active" : ""}" data-group="${esc(g)}" ${g === act ? 'aria-current="true"' : ""}>${esc(g)}</button>`).join("")
-      + `<button class="cat cat-all" data-act="all-cats" aria-haspopup="dialog">Все категории</button>`;
+    const chip = (g) => `<button class="cat ${g === act ? "active" : ""}" data-group="${esc(g)}" ${g === act ? 'aria-current="true"' : ""}>${esc(g)}</button>`;
+    // «Категории» — сразу после «Все»: все 30 разделов одним экраном, не нужно листать ряд до конца
+    bar.innerHTML = chip("Все")
+      + `<button class="cat cat-all" data-act="all-cats" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="1.8"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.8"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.8"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.8"/></svg>Категории</button>`
+      + state.groups.map((g) => chip(g.name)).join("");
     M.thumbs(bar, prev);
   }
   function activeGroup() {
