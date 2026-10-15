@@ -620,6 +620,11 @@ img.fly { object-fit: cover; border-radius: 16px; }
 .pills::-webkit-scrollbar { display: none; }
 .pill { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--surface); box-shadow: var(--shadow); font-size: 15px; font-weight: 500; }
 .pill small { color: var(--ink-3); font-size: 13px; font-variant-numeric: tabular-nums; }
+/* бренд → модель в разделе: выбранная пилюля — заливка акцентом */
+.bm-row { padding-top: 8px; }
+.bm-row + .bm-row { padding-top: 6px; }
+.pill.on { background: var(--accent); color: #fff; box-shadow: none; }
+.pill.on small { color: rgba(255,255,255,.75); }
 .rail-more { flex: none; align-self: stretch; width: 120px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: var(--r-card); background: var(--fill); color: var(--link); font-size: 15px; font-weight: 500; padding: 12px; }
 .rail-more svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .s-often { margin-top: 26px; }

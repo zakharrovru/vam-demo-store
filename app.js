@@ -70,7 +70,7 @@
   const state = {
     items: [], groups: [], trending: [], searches: [], updatedAt: null, loaded: false, offline: false,
     route: { name: "home" }, q: "", searchMode: false, sort: "pop", stockOnly: false, tab: "catalog",
-    f: { mem: new Set(), color: new Set(), cond: new Set(), sim: new Set(), min: null, max: null },
+    f: { mem: new Set(), color: new Set(), cond: new Set(), sim: new Set(), min: null, max: null, brand: null, model: null },
   };
 
   // ---------- хранилище на устройстве ----------
@@ -578,12 +578,116 @@
     out.price = prices.length ? [Math.min(...prices), Math.max(...prices)] : [0, 0];
     return out;
   }
-  const filtersActive = () => FILTERS.some(([k]) => state.f[k].size) || state.f.min != null || state.f.max != null;
-  function resetFilters() { FILTERS.forEach(([k]) => state.f[k].clear()); state.f.min = state.f.max = null; }
+  // ---------- бренд → модель (быстрый выбор внутри раздела, один тап) ----------
+  const BRANDS = [
+    ["Apple", /\b(iphone|ipad|airpods|airtag|macbook|imac|apple|magic mouse)\b/i, ["iPhone", "iPhone б/у", "MacBook", "iMac", "Apple Watch"]],
+    ["Samsung", /\b(samsung|galaxy)\b/i, ["Samsung", "Galaxy Watch"]],
+    ["Xiaomi", /\b(xiaomi|redmi|poco|mi \d)/i], ["Honor", /\bhonor\b/i], ["Huawei", /\b(huawei|matebook)\b/i],
+    ["Google", /\b(google|pixel|fitbit)\b/i],
+    ["Garmin", /\b(garmin|fenix|forerunner|venu|instinct|vivoactive|lily|enduro|descent|tactix|quatix|approach)\b/i, ["Garmin"]],
+    ["Dyson", /\bdyson\b/i, ["Dyson"]], ["Marshall", /\bmarshall\b/i], ["Sony", /\b(sony|ps5|playstation)\b/i],
+    ["JBL", /\bjbl\b/i], ["Яндекс", /яндекс/i], ["DeLonghi", /delonghi/i], ["Kugoo", /\bkugoo\b/i], ["Ninebot", /\bninebot\b/i],
+    ["Alpicool", /\balpicool\b/i, ["Автохолодильники"]], ["DJI", /\bdji\b/i], ["Insta360", /insta ?360/i], ["GoPro", /gopro/i],
+    ["Canon", /\bcanon\b/i], ["Nikon", /\bnikon\b/i], ["Ray-Ban", /ray-ban/i], ["Roborock", /roborock/i], ["Baofeng", /baofeng/i],
+    ["Hangkai", /hangkai/i], ["Infinix", /infinix/i], ["Simgot", /simgot/i],
+  ];
+  const upFirst = (w) => w.replace(/^\S/, (x) => x.toUpperCase());
+  // [когда применять, регэксп по названию, как назвать модель] — первое совпадение
+  const MODELS = [
+    [(it) => /^iPhone/.test(it.category), /^(SE \d{4}|XS Max|XS|XR|5S|6s|7 Plus|7|\d{1,2}[eE](?=\s)|\d{1,2}(?: Pro Max| Pro| Plus| Air| Mini)?)/i,
+      (m) => "iPhone " + m.replace(/^(\d+)E$/i, "$1e")],
+    [(it) => it.category === "Samsung", /^(Z (?:Fold|Flip)\s?\d+(?: Ultra)?|S\d+\+?(?: Ultra| FE)?|A\d+S?|Note \d+(?: Ultra)?)/i,
+      (m) => "Galaxy " + m.replace(/\s+/g, " ")],
+    [() => true, /airpods\s*(pro\s*\d|pro|max\s*\d|max|\d)(\s*anc)?/i,
+      (m, r) => "AirPods " + upFirst(r[1].replace(/\s+/g, " ").toLowerCase()) + (r[2] ? " ANC" : "")],
+    [() => true, /buds\s*(core|\d+\s*(?:pro|fe)?)/i,
+      (m, r) => "Galaxy Buds " + upFirst(r[1].replace(/\s+/g, " ").toLowerCase()).replace(/ pro$/, " Pro").replace(/ fe$/, " FE")],
+    [(it) => it.category === "Apple Watch", /^(SE\s?\d|S\d+|Ultra\s?\d?)/i,
+      (m) => "Apple Watch " + m.replace(/^SE\s?/i, "SE ").replace(/^Ultra\s?/i, "Ultra ").trim()],
+    [(it) => it.category === "MacBook", /^(13 Neo|Air 1[35]|Pro 1[346])(?:.*?\b(M\d(?: Pro| Max)?|A18Pro|i[357])\b)?/i,
+      (m, r) => "MacBook " + r[1] + (r[2] ? " " + r[2] : "")],
+    [(it) => /ipad/i.test(it.name), /ipad\s*(pro\s*1[13]"?|pro\s*12\.9"?|air\s*1[13]|air|mini|\d+)(?:.*?\b(M\d|A1\d)\b)?/i,
+      (m, r) => "iPad " + upFirst(r[1].replace(/"/g, "").toLowerCase()).replace(/ (\d)/, " $1") + (r[2] ? " " + r[2] : "")],
+    [() => true, /(fenix\s*\d+x?(?:\s*pro)?|forerunner\s*\d+|venu\s*(?:x1|\d+s?)?|instinct\s*(?:\d+x?|crossover)|vivoactive\s*\d|lily\s*\d|enduro\s*\d?|descent\s*\w+|tactix\s*\d|quatix\s*\d|approach\s*\w+)/i,
+      (m) => upFirst(m.replace(/\s+/g, " ").toLowerCase()).replace(/\b(x1|s70|j1|g2|mk3i?)\b/gi, (x) => x.toUpperCase()).replace(/\b(pro|crossover)\b/g, upFirst).replace(/(\d)x\b/g, "$1X")],
+    [() => true, /\b(H[SDT]\d{2})\b/, (m) => "Dyson " + m],
+    [() => true, /major\s*(iv|v)\b/i, (m, r) => "Major " + r[1].toUpperCase()],
+    [() => true, /станция\s*(лайт\s*\d?|миди|макс|\d)/i, (m, r) => "Станция " + upFirst(r[1])],
+    [() => true, /\bkugoo\s+(wish\s*\d+|[a-z]+\d*\+?)/i, (m, r) => "Kugoo " + r[1].replace(/\s+/g, " ").toUpperCase().replace(/^WISH/, "Wish")],
+    [() => true, /(airtag|apple pencil|magic mouse|battery pack|smarttag\s*\d?|блок питания|кабель)/i, (m) => upFirst(m.replace(/\s+/g, " ").toLowerCase()).replace(/^Apple pencil/, "Apple Pencil").replace(/^Airtag/, "AirTag").replace(/^Magic mouse/, "Magic Mouse").replace(/^Battery pack/, "Battery Pack").replace(/^Smarttag/, "SmartTag")],
+  ];
+  const _bm = new Map();
+  function brandModel(it) {
+    let r = _bm.get(it.id);
+    if (r) return r;
+    const hay = `${it.category} ${it.name}`;
+    const b = BRANDS.find(([, re, cats]) => (cats && cats.includes(it.category)) || re.test(hay));
+    let model = "";
+    for (const [when, re, fmt] of MODELS) {
+      if (!when(it)) continue;
+      const m = re.exec(it.name);
+      if (m) { model = fmt(m[0].trim(), m); break; }
+    }
+    r = { brand: b ? b[0] : "Другие", model };
+    _bm.set(it.id, r);
+    return r;
+  }
+  // Порядок моделей. iPhone — по поколениям (18 Pro Max, 18 Pro, 17 Pro Max…). Остальные — сначала линейка
+  // (Galaxy S → Z Fold → Z Flip → A; Watch Ultra → S → SE; Air 13 → Air 15 → Pro…), внутри — от новых к старым.
+  const TIER = [/ultra|pro max|max/i, /pro/i, /plus|\+/i, /air/i, /\bfe\b|\d+e\b|lite|mini|\bse\b/i];
+  const tierOf = (m) => { const t = TIER.findIndex((re) => re.test(m)); return t < 0 ? 3.5 : t; };
+  const LINE_ORDER = ["Galaxy S", "Galaxy Z Fold", "Galaxy Z Flip", "Galaxy A", "Galaxy Note", "Apple Watch Ultra", "Apple Watch S", "Apple Watch SE",
+    "MacBook Air 13", "MacBook Air 15", "MacBook Pro 14", "MacBook Pro 16", "MacBook Pro 13", "MacBook 13 Neo", "iPad Pro", "iPad Air", "iPad mini", "iPad",
+    "AirPods Max", "AirPods Pro", "AirPods", "Galaxy Buds"];
+  const chipGen = (m) => { const c = /\b(M(\d)|A18Pro|i\d)\b/.exec(m); return !c ? 0 : c[2] ? +c[2] + 1 : c[1] === "A18Pro" ? 1.5 : 0.5; };
+  const lineOf = (m) => /^MacBook/.test(m) ? m.replace(/\s+(M\d.*|A18Pro|i\d)$/, "") : m.replace(/\s*\d.*$/, "");
+  const genOf = (m) => {
+    if (/^(MacBook|iPad)/.test(m)) return chipGen(m) * 100 + +((/(\d+)/.exec(m) || [])[1] || 0);
+    if (/^iPhone SE/.test(m)) return 9;                   // SE 2020 — ровесник iPhone 11, а не «2020-е поколение»
+    if (/^iPhone X/.test(m)) return 10;
+    return +((/(\d+)/.exec(m) || [])[1] || 0);
+  };
+  function sortModels(entries) {
+    const phone = entries.length && /^iPhone /.test(entries[0][0]);
+    const lineCount = new Map();
+    entries.forEach(([m, n]) => lineCount.set(lineOf(m), (lineCount.get(lineOf(m)) || 0) + n));
+    const lineRank = (l) => { const i = LINE_ORDER.findIndex((x) => l === x || l.startsWith(x + " ")); return i < 0 ? 100 : i; };
+    return entries.sort((x, y) => {
+      const [a, b] = [x[0], y[0]];
+      if (!phone) {
+        const la = lineOf(a), lb = lineOf(b);
+        if (la !== lb) return lineRank(la) - lineRank(lb) || lineCount.get(lb) - lineCount.get(la) || la.localeCompare(lb);
+      }
+      return genOf(b) - genOf(a) || tierOf(a) - tierOf(b) || y[1] - x[1];
+    });
+  }
+  function brandFacets(list) {
+    const brands = new Map(), models = new Map();
+    list.forEach((it) => {
+      const { brand, model } = brandModel(it);
+      brands.set(brand, (brands.get(brand) || 0) + 1);
+      if (model && (!state.f.brand || state.f.brand === brand)) models.set(model, (models.get(model) || 0) + 1);
+    });
+    const b = [...brands.entries()].sort((x, y) => (x[0] === "Другие") - (y[0] === "Другие") || y[1] - x[1]);
+    const m = sortModels([...models.entries()]);
+    return { brands: b, models: m };
+  }
+  // ряд брендов (если их больше одного) и ряд моделей (сразу, если бренд в разделе один, иначе — после выбора бренда)
+  function brandBarHTML(base) {
+    const { brands, models } = brandFacets(base);
+    const row = (items, key, sel, label) => `<div class="pills bm-row" role="group" aria-label="${label}">${items.map(([v, n]) =>
+      `<button class="pill ${sel === v ? "on" : ""}" data-${key}="${esc(v)}" aria-pressed="${sel === v}">${esc(v)} <small>${n}</small></button>`).join("")}</div>`;
+    return (brands.length > 1 ? row(brands, "brand", state.f.brand, "Бренд") : "") +
+      (models.length > 1 && (brands.length <= 1 || state.f.brand) ? row(models, "model", state.f.model, "Модель") : "");
+  }
+  const filtersActive = () => FILTERS.some(([k]) => state.f[k].size) || state.f.min != null || state.f.max != null || !!state.f.brand || !!state.f.model;
+  function resetFilters() { FILTERS.forEach(([k]) => state.f[k].clear()); state.f.min = state.f.max = null; state.f.brand = state.f.model = null; }
   function applyFilters(list, skip) {
     const f = state.f;
     return list.filter((it) => {
       if (state.stockOnly && !inStock(it)) return false;
+      if (state.f.brand && brandModel(it).brand !== state.f.brand) return false;
+      if (state.f.model && brandModel(it).model !== state.f.model) return false;
       for (const [k] of FILTERS) if (k !== skip && f[k].size && !f[k].has(fval[k](it))) return false;
       if (skip !== "price" && f.min != null && it.price < f.min) return false;
       if (skip !== "price" && f.max != null && it.price > f.max) return false;
@@ -955,7 +1059,7 @@
     const base = catItems(c);
     const list = sortList(applyFilters(base), state.sort);
     setHead(c, filtersActive() || state.stockOnly ? `${goods(list.length)} из ${base.length}` : goods(base.length));
-    $("#view").innerHTML = `${toolbarHTML(false)}${filterBarHTML(base)}
+    $("#view").innerHTML = `${brandBarHTML(base)}${toolbarHTML(false)}${filterBarHTML(base)}
       <div class="grid">${list.length
         ? gridCards(list, null, true)
         : `<div class="empty">${ICON.search}<b>Ничего нет</b><p>Под выбранные фильтры товаров не нашлось.</p><button class="pill-btn ghost" data-act="f-reset">Сбросить фильтры</button></div>`}
@@ -2104,7 +2208,7 @@
       if (isSearching() && state.q.trim()) track.push("click_search", { q: state.q.trim(), item_id: card.dataset.id });
       return showProduct(card.dataset.id, { from: $(".tile", card) });
     }
-    const t = e.target.closest("[data-q], [data-cat], [data-group], [data-sort], [data-stock], [data-filter], [data-act]");
+    const t = e.target.closest("[data-q], [data-cat], [data-group], [data-sort], [data-stock], [data-filter], [data-brand], [data-model], [data-act]");
     if (!t) return;
     if (t.dataset.q !== undefined) { hap.sel(); saveRecent(t.dataset.q); qInput.blur(); if (!state.searchMode) state.searchMode = true; return setQuery(t.dataset.q); }
     if (t.dataset.cat !== undefined) { hap.sel(); return openCat(t.dataset.cat, state.route.name === "group" ? state.route.group : ""); }
@@ -2112,6 +2216,9 @@
     if (t.dataset.sort) { hap.sel(); state.sort = t.dataset.sort; return render(); }
     if (t.dataset.stock !== undefined) { hap.sel(); state.stockOnly = !state.stockOnly; return render(); }
     if (t.dataset.filter) return openFilter(t.dataset.filter);
+    // бренд и модель: один тап выбирает, повторный снимает; смена бренда сбрасывает модель
+    if (t.dataset.brand !== undefined) { hap.sel(); const b = t.dataset.brand; state.f.brand = state.f.brand === b ? null : b; state.f.model = null; return render(); }
+    if (t.dataset.model !== undefined) { hap.sel(); const m = t.dataset.model; state.f.model = state.f.model === m ? null : m; return render(); }
     const id = t.dataset.id;
     switch (t.dataset.act) {
       case "retry": renderSkeleton(); refresh(); break;
