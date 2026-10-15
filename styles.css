@@ -542,16 +542,14 @@ main { padding-bottom: calc(var(--tab-h) + var(--safe-bottom) + 40px); }
 .instant, .instant::before, .instant::after { transition: none !important; }
 
 /* цифровой барабан */
-/* Одометр цены (motion.js roll): окно каждой цифры обрезает ленту обычным overflow — работает и в WebView iOS.
-   .odo-g — невидимая итоговая цифра, держит ширину; .odo-s — лента, едет 2D-сдвигом. */
+/* Цифровой барабан цены (motion.js roll): лента 0–9 в окне строки */
 .odo { display: inline-flex; white-space: nowrap; vertical-align: top; }
-.odo > span { margin-right: var(--ls, 0); }
+.odo > span { margin-right: var(--ls, 0); }   /* letter-spacing переносим в отступ — строка не «прыгает» по ширине */
+.odo-d { display: inline-block; overflow: hidden; vertical-align: top;
+  -webkit-mask-image: linear-gradient(transparent, #000 22%, #000 78%, transparent); mask-image: linear-gradient(transparent, #000 22%, #000 78%, transparent); }
+.odo-s { display: flex; flex-direction: column; transition: transform var(--dur-3) var(--spring-smooth); transition-delay: calc(var(--k, 0) * 28ms); }
+.odo-s > span { display: block; text-align: center; }
 .odo, .odo span { font-size: inherit !important; font-weight: inherit !important; color: inherit !important; letter-spacing: 0; }
-.odo-d { position: relative; display: inline-block; overflow: hidden; vertical-align: top; }
-.odo-g { display: block; text-align: center; }
-.odo-d.spin .odo-g { visibility: hidden; }
-.odo-s { position: absolute; left: 0; right: 0; top: 0; display: flex; flex-direction: column; text-align: center; will-change: transform; }
-.odo-s > span { display: block; }
 .odo-new { animation: fade-in var(--dur-2) var(--spring-smooth); }
 
 /* общий элемент «плитка → герой» и полёт в корзину */

@@ -147,104 +147,70 @@ window.Motion = (() => {
     list.forEach((c) => glide(c, prev && prev.get(c.dataset.thumb)));
   }
 
-  // ---------- цифры цены: одометр ----------
-  // Каждая цифра — окно overflow:hidden с лентой цифр, лента едет обычным 2D-сдвигом (так надёжно и в WebView
-  // Telegram на iOS, где маски и 3D не обрезают анимируемые слои). Лента содержит все промежуточные цифры,
-  // поэтому значение «проматывается», а не перескакивает. Щелчки виброотклика считаются из той же кривой
-  // движения: момент, когда цифра проходит очередное значение, = момент щелчка.
-  const ROLL_MS = 1000;
-  const ROLL_BEZIER = [0.22, 1, 0.36, 1];                // ease-out: быстрый старт, долгое мягкое торможение
-  const ROLL_EASE = `cubic-bezier(${ROLL_BEZIER.join(",")})`;
+  // ---------- цифровой барабан (одометр) ----------
+  // Каждая цифра — лента 0–9 в окне строки, едет CSS-переходом var(--dur-3) var(--spring-smooth)
+  // с разносом 28 мс по разрядам. Виброотклик: одна смена цифры — один толчок; момент толчка считается
+  // по той же кривой, что и движение ленты, поэтому щелчок совпадает с моментом, когда цифра проходит окно.
   const isDigit = (ch) => ch >= "0" && ch <= "9";
-  const numOf = (s) => +String(s).replace(/\D/g, "") || 0;
-  const rollText = (el) => (el._rollTo != null ? el._rollTo : el.textContent);
+  const STRIP = Array.from({ length: 10 }, (_, i) => `<span>${i}</span>`).join("");
+  const rollText = (el) => { const v = el.querySelector(":scope > .vh"); return v && el.querySelector(":scope > .odo") ? v.textContent : el.textContent; };
 
-  // прогресс движения в момент времени x (0..1) для cubic-bezier — как считает браузер
-  function bezierAt(x, [x1, y1, x2, y2]) {
-    const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
-    const cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
-    let lo = 0, hi = 1, s = x;
-    for (let i = 0; i < 24; i++) {                      // бисекция по параметру кривой
-      const xs = ((ax * s + bx) * s + cx) * s;
-      if (Math.abs(xs - x) < 1e-5) break;
-      if (xs < x) lo = s; else hi = s;
-      s = (lo + hi) / 2;
-    }
-    return ((ay * s + by) * s + cy) * s;
+  // кривая --spring-smooth из styles.css: linear() где поддерживается, иначе cubic-bezier(.32,.72,0,1)
+  const SPRING_PTS = [0, .0265, .0902, .1734, .2642, .3554, .4422, .5221, .594, .6575, .7127, .7603, .8009, .8352, .8641, .8883, .9084, .9251, .9389, .9503, .9596, .9672, .9734, .9785, .9826, .986, .9887, .9909, .9927, .9941, .9953, .9962, .997, .9976, .9981, .9985, .9988, .999, .9992, .9994, 1];
+  const HAS_LINEAR = (() => { try { return CSS.supports("transition-timing-function", "linear(0, 1)"); } catch { return false; } })();
+  function bezierAt(x, x1, y1, x2, y2) {
+    const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx, cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+    let lo = 0, hi = 1, t = x;
+    for (let i = 0; i < 24; i++) { const xs = ((ax * t + bx) * t + cx) * t; if (Math.abs(xs - x) < 1e-5) break; if (xs < x) lo = t; else hi = t; t = (lo + hi) / 2; }
+    return ((ay * t + by) * t + cy) * t;
   }
-  // моменты (мс от старта), когда колонка с dist шагами проходит очередную цифру
-  function crossTimes(dist, delay) {
-    const out = [];
-    let k = 1;
-    for (let i = 1; i <= 400 && k <= dist; i++) {
-      const t = i / 400;
-      while (k <= dist && bezierAt(t, ROLL_BEZIER) * dist >= k - 0.5) { out.push(delay + t * ROLL_MS); k++; }
-    }
-    return out;
-  }
-  function scheduleTicks(el, times, endAt) {
-    (el._rollTicks || []).forEach(clearTimeout);
-    const picked = [];
-    times.sort((x, y) => x - y).forEach((t) => { if (!picked.length || t - picked[picked.length - 1] >= 45) picked.push(t); });
-    el._rollTicks = picked.map((t) => setTimeout(() => { try { api.onTick && api.onTick(); } catch {} }, t));
-    el._rollTicks.push(setTimeout(() => { try { api.onSettle && api.onSettle(); } catch {} }, endAt));
-  }
+  const curveAt = (x) => {
+    if (!HAS_LINEAR) return bezierAt(x, .32, .72, 0, 1);
+    const f = x * (SPRING_PTS.length - 1), i = Math.min(SPRING_PTS.length - 2, Math.floor(f));
+    return SPRING_PTS[i] + (SPRING_PTS[i + 1] - SPRING_PTS[i]) * (f - i);
+  };
+  // момент (доля длительности), когда пройдена доля пути p
+  const timeFor = (p) => { let lo = 0, hi = 1; for (let i = 0; i < 30; i++) { const m = (lo + hi) / 2; if (curveAt(m) < p) lo = m; else hi = m; } return hi; };
 
   function roll(el, to, from) {
     if (!el) return;
-    from = from ?? rollText(el);
     clearTimeout(el._rollT);
     (el._rollTicks || []).forEach(clearTimeout);
-    if (from === to || reduced() || !from || !/\d/.test(to)) { el._rollTo = null; el.textContent = to; return; }
+    from = from ?? rollText(el);
+    if (from === to || reduced() || !from || !/\d/.test(to)) { el.textContent = to; return; }
     const cs = getComputedStyle(el);
     let lh = parseFloat(cs.lineHeight);
     if (!lh) lh = parseFloat(cs.fontSize) * 1.2;
     const ls = parseFloat(cs.letterSpacing) || 0;
-    const dir = numOf(to) >= numOf(from) ? 1 : -1;      // дороже — цифры уходят вверх, дешевле — вниз
-    const a = [...from], b = [...to], n = b.length;
-    let first = -1;                                      // самый старший изменившийся разряд
-    for (let i = 0; i < n; i++) { const o = a[a.length - (n - i)]; if (isDigit(b[i]) && o !== b[i]) { first = i; break; } }
-    const cols = [];
-    let html = "";
+    const dur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--dur-3")) || 640;
+    const a = [...from], b = [...to];
+    const n = b.length;
+    let html = "", digits = 0;
+    const targets = [], ticks = [];
     for (let i = 0; i < n; i++) {
       const ch = b[i], old = a[a.length - (n - i)];
       if (!isDigit(ch)) { html += `<span class="odo-c">${ch === " " ? "&nbsp;" : ch}</span>`; continue; }
-      const t = +ch, o = old && isDigit(old) ? +old : null;
-      const k = b.slice(i).filter(isDigit).length;     // 1 — единицы, 2 — десятки…
-      let dist = 0;
-      if (o !== null && first >= 0 && i >= first) {
-        dist = dir > 0 ? (t - o + 10) % 10 : (o - t + 10) % 10;
-        dist += 10 * (k === 1 ? 2 : k === 2 ? 1 : 0);   // младшие разряды «проматываются» сильнее
+      const o = old && isDigit(old) ? +old : null;
+      const k = n - i;
+      targets.push(+ch);
+      html += `<span class="odo-d${o === null ? " odo-new" : ""}" style="height:${lh}px;--k:${k}"><span class="odo-s" style="transform:translateY(${-(o ?? +ch) * lh}px)">${STRIP}</span></span>`;
+      digits++;
+      // одна смена цифры — один толчок: лента проходит |t−o| цифр, толчок — когда очередная цифра встаёт в окно
+      if (o !== null && o !== +ch) {
+        const steps = Math.abs(+ch - o);
+        for (let j = 1; j <= steps; j++) ticks.push(k * 28 + timeFor((j - 0.5) / steps) * dur);
       }
-      // лента сверху вниз. Рост: o, o+1 … t, едем вверх (0 → −dist). Падение: t, t+1 … o, едем вниз (−dist → 0)
-      const cells = Array.from({ length: dist + 1 }, (_, j) => `<span>${((dir > 0 ? (o ?? t) + j : t + j) % 10 + 10) % 10}</span>`).join("");
-      html += `<span class="odo-d${o === null ? " odo-new" : ""}" style="height:${lh}px"><span class="odo-g">${ch}</span>` +
-        (dist ? `<span class="odo-s">${cells}</span>` : "") + `</span>`;
-      cols.push({ dist, k });
     }
-    el._rollTo = to;
     el.innerHTML = `<span class="vh">${to}</span><span class="odo" aria-hidden="true" style="line-height:${lh}px;--ls:${ls}px">${html}</span>`;
-    const strips = el.querySelectorAll(".odo-d");
-    const times = [];
-    let end = 0;
-    let si = 0;
-    strips.forEach((d, idx) => {
-      const c = cols[idx], s = d.querySelector(".odo-s");
-      if (!s || !c.dist) return;
-      const delay = (c.k - 1) * 22;
-      const startY = dir > 0 ? 0 : -c.dist * lh, endY = dir > 0 ? -c.dist * lh : 0;
-      s.style.transform = `translateY(${startY}px)`;
-      d.classList.add("spin");
-      void s.offsetHeight;
-      s.style.transition = `transform ${ROLL_MS}ms ${ROLL_EASE} ${delay}ms`;
-      s.style.transform = `translateY(${endY}px)`;
-      if (el.hasAttribute("data-haptic")) times.push(...crossTimes(c.dist, delay));
-      end = Math.max(end, delay + ROLL_MS);
-      si++;
-    });
-    if (!si) { el._rollTo = null; el.textContent = to; return; }
-    if (el.hasAttribute("data-haptic")) scheduleTicks(el, times, end - 60);
-    el._rollT = setTimeout(() => { if (el._rollTo === to) { el._rollTo = null; el.textContent = to; } }, end + 80);
+    const strips = el.querySelectorAll(".odo-s");
+    void el.offsetWidth;
+    strips.forEach((s, i) => { s.style.transform = `translateY(${-targets[i] * lh}px)`; });
+    if (el.hasAttribute("data-haptic") && ticks.length) {
+      const picked = [];
+      ticks.sort((x, y) => x - y).forEach((t) => { if (!picked.length || t - picked[picked.length - 1] >= 30) picked.push(t); });
+      el._rollTicks = picked.map((t) => setTimeout(() => { try { api.onTick && api.onTick(); } catch {} }, t));
+    }
+    el._rollT = setTimeout(() => { el.textContent = to; }, dur + 120 + digits * 30);
   }
   const captureRolls = (root) => {
     const m = new Map();
@@ -443,6 +409,6 @@ window.Motion = (() => {
   }
 
   // onTick — приложение подставляет щелчок виброотклика (Telegram HapticFeedback.selectionChanged)
-  const api = { reduced, spring, rubber, morph, glide, thumbs, captureThumbs, roll, captureRolls, applyRolls, fly, pulse, parallax, ambient, reveal, tilt, heroSwap, replay, clamp, lerp, hasView, onTick: null, onSettle: null };
+  const api = { reduced, spring, rubber, morph, glide, thumbs, captureThumbs, roll, captureRolls, applyRolls, fly, pulse, parallax, ambient, reveal, tilt, heroSwap, replay, clamp, lerp, hasView, onTick: null };
   return api;
 })();

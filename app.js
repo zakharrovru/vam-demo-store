@@ -116,12 +116,11 @@
     tap(k = "light") { if (tgAt("6.1")) try { tg.HapticFeedback.impactOccurred(k); } catch {} },
     note(t) { if (tgAt("6.1")) try { tg.HapticFeedback.notificationOccurred(t); } catch {} },
   };
-  // прокрутка цифр цены: лёгкие щелчки во время прокрутки и мягкий «стук», когда цифры встали на место
+  // барабан цены: одна смена цифры — один толчок
   M.onTick = () => {
     if (inTelegram) hap.sel();
     else if (navigator.vibrate && matchMedia("(pointer: coarse)").matches && navigator.userActivation?.hasBeenActive) try { navigator.vibrate(4); } catch {}
   };
-  M.onSettle = () => { if (inTelegram) hap.tap("soft"); };
   const ICON = {
     x: `<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 1l10 10M11 1 1 11"/></svg>`,
     chat: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4c4.7 0 8.5 3.1 8.5 7s-3.8 7-8.5 7c-.9 0-1.8-.1-2.6-.3L5 19.5l1.2-3.4C4.6 14.8 3.5 13 3.5 11c0-3.9 3.8-7 8.5-7Z"/></svg>`,
