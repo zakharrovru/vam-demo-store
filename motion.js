@@ -147,37 +147,109 @@ window.Motion = (() => {
     list.forEach((c) => glide(c, prev && prev.get(c.dataset.thumb)));
   }
 
-  // ---------- цифровой барабан (одометр) ----------
+  // ---------- цифровой барабан как пикер «Будильника» iOS ----------
+  // Каждая цифра — цилиндр: прокручивается через промежуточные значения с перспективой,
+  // соседние цифры видны и гаснут сверху/снизу, на каждом «зубце» — щелчок (onTick → haptic).
   const isDigit = (ch) => ch >= "0" && ch <= "9";
-  const STRIP = Array.from({ length: 10 }, (_, i) => `<span>${i}</span>`).join("");
-  // текст элемента без «ленты» 0–9 незавершённой прокрутки (иначе быстрый повторный клик крутит от мусора)
+  const numOf = (s) => +String(s).replace(/\D/g, "") || 0;
+  // текст элемента без барабанов незавершённой прокрутки (иначе быстрый повторный клик крутит от мусора)
   const rollText = (el) => { const v = el.querySelector(":scope > .vh"); return v && el.querySelector(":scope > .odo") ? v.textContent : el.textContent; };
+  const WHEEL_CELLS = 5;                 // видимые ячейки цилиндра: центр ± 2
+  const easeOutQuint = (t) => 1 - Math.pow(1 - t, 5);
+  // «зубчатость»: позиция слегка задерживается у каждой цифры — ощущение щелчков, как у колёсика
+  const detent = (p) => p - Math.sin(2 * Math.PI * p) / (2 * Math.PI) * 0.35;
+  let lastTick = 0;
+  function tick() {
+    const now = performance.now();
+    if (now - lastTick < 28) return;     // не чаще ~35 щелчков/с на все барабаны сразу
+    lastTick = now;
+    try { api.onTick && api.onTick(); } catch {}
+  }
+
   function roll(el, to, from) {
     if (!el) return;
+    if (el._rollRaf) cancelAnimationFrame(el._rollRaf);
     clearTimeout(el._rollT);
     from = from ?? rollText(el);
     if (from === to || reduced() || !from || !/\d/.test(to)) { el.textContent = to; return; }
     const cs = getComputedStyle(el);
     let lh = parseFloat(cs.lineHeight);
     if (!lh) lh = parseFloat(cs.fontSize) * 1.2;
+    const dir = numOf(to) >= numOf(from) ? 1 : -1;  // дороже — цифры уходят вверх, дешевле — вниз
     const a = [...from], b = [...to];
     const n = b.length;
-    let html = "", digits = 0;
-    const targets = [];
+    let html = "";
+    const cols = [];
+    let firstChanged = -1;
+    for (let i = 0; i < n; i++) {
+      const old = a[a.length - (n - i)];
+      if (isDigit(b[i]) && old !== b[i]) { firstChanged = i; break; }
+    }
     for (let i = 0; i < n; i++) {
       const ch = b[i], old = a[a.length - (n - i)];
       if (!isDigit(ch)) { html += `<span class="odo-c">${ch === " " ? "&nbsp;" : ch}</span>`; continue; }
-      const o = old && isDigit(old) ? +old : null;
-      const k = n - i;
-      targets.push(+ch);
-      html += `<span class="odo-d${o === null ? " odo-new" : ""}" style="height:${lh}px;--k:${k}"><span class="odo-s" style="transform:translateY(${-(o ?? +ch) * lh}px)">${STRIP}</span></span>`;
-      digits++;
+      const t = +ch, o = old && isDigit(old) ? +old : null;
+      const k = [...b.slice(i)].filter(isDigit).length;     // позиция справа: 1 — единицы
+      // младшие разряды крутятся сильнее (как при быстром пролистывании), старшие — ровно до цели
+      const spinning = firstChanged >= 0 && i >= firstChanged;
+      const turns = !spinning ? 0 : k === 1 ? 2 : k === 2 ? 1 : 0;
+      const base = o ?? t;
+      let dist = dir > 0 ? (t - base + 10) % 10 : (base - t + 10) % 10;
+      if (spinning) dist += 10 * turns;
+      if (o === null) dist = 0;
+      const cells = Array.from({ length: WHEEL_CELLS }, () => "<span></span>").join("");
+      html += `<span class="odo-d${o === null ? " odo-new" : ""}" style="height:${lh}px"><span class="odo-w" style="height:${lh * 1.7}px;top:${-lh * .35}px">${cells}</span><span class="odo-g">${ch}</span></span>`;
+      cols.push({ start: base, dist, dir, k, last: null });
     }
-    el.innerHTML = `<span class="vh">${to}</span><span class="odo" aria-hidden="true" style="line-height:${lh}px">${html}</span>`;
-    const strips = el.querySelectorAll(".odo-s");
-    void el.offsetWidth;
-    strips.forEach((s, i) => { s.style.transform = `translateY(${-targets[i] * lh}px)`; });
-    el._rollT = setTimeout(() => { el.textContent = to; }, 760 + digits * 30);
+    // letter-spacing переносим в отступы: внутри flex-барабана он теряется и строка «прыгала» на ~1 px на символ
+    const ls = parseFloat(cs.letterSpacing) || 0;
+    el.innerHTML = `<span class="vh">${to}</span><span class="odo" aria-hidden="true" style="line-height:${lh}px;--ls:${ls}px">${html}</span>`;
+    const nodes = [...el.querySelectorAll(".odo-d")];
+    cols.forEach((c, i) => {
+      c.node = nodes[i];
+      c.cells = [...nodes[i].querySelectorAll(".odo-w > span")];
+      // длительность растёт с числом цифр, которые надо пролистать; лёгкий разнос по разрядам
+      c.dur = c.dist ? 520 + Math.min(c.dist, 32) * 26 : 0;
+      c.delay = (c.k - 1) * 18;
+    });
+    // окно цилиндра выступает за строку лишь на треть высоты — соседние цифры только «выглядывают»,
+    // не наезжая на заголовок и строку «≈ ₽»
+    const R = lh * .9;                        // радиус цилиндра
+    const wheelTop = lh * .35;          // центр окна цилиндра
+    const draw = (c, pos) => {
+      const center = Math.round(pos);
+      c.cells.forEach((cell, j) => {
+        const idx = center + j - 2;           // ячейки: центр-2 … центр+2
+        const d = idx - pos;                  // смещение от центра в ячейках
+        const ang = d * 0.42;                 // ~24° на ячейку
+        if (Math.abs(ang) > 1.45) { cell.style.opacity = "0"; return; }
+        cell.textContent = String(((idx % 10) + 10) % 10);
+        cell.style.transform = `translateY(${wheelTop + Math.sin(ang) * R}px) rotateX(${-ang}rad) scaleY(${Math.max(.35, Math.cos(ang))})`;
+        cell.style.opacity = String(Math.max(0, Math.cos(ang) ** 4));
+      });
+      if (c.last !== null && center !== c.last) tick();
+      c.last = center;
+    };
+    const t0 = performance.now();
+    const maxEnd = Math.max(0, ...cols.map((c) => c.delay + c.dur));
+    cols.forEach((c) => { if (c.dist) { c.node.classList.add("spin"); draw(c, c.start); } });
+    const frame = (now) => {
+      let busy = false;
+      cols.forEach((c) => {
+        if (!c.dist || c.done) return;
+        const t = Math.min(1, Math.max(0, (now - t0 - c.delay) / c.dur));
+        const p = detent(easeOutQuint(t) * c.dist);
+        draw(c, c.start + c.dir * p);
+        if (t >= 1) { c.done = true; c.node.classList.remove("spin"); }
+        else busy = true;
+      });
+      if (busy && now - t0 < maxEnd + 200) el._rollRaf = requestAnimationFrame(frame);
+      else finish();
+    };
+    const finish = () => { cancelAnimationFrame(el._rollRaf); clearTimeout(el._rollT); el._rollRaf = 0; el.textContent = to; };
+    el._rollRaf = requestAnimationFrame(frame);
+    // страховка: если кадры не идут (вкладка/Telegram свёрнуты), цена всё равно встанет в итоговое значение
+    el._rollT = setTimeout(finish, maxEnd + 400);
   }
   const captureRolls = (root) => {
     const m = new Map();
@@ -218,7 +290,12 @@ window.Motion = (() => {
       frames.push({ offset: u, transform: `translate(${x - r.width / 2}px,${y - r.height / 2}px) scale(${sc}) rotate(${-10 * s}deg)`, opacity: u < 0.82 ? 1 : lerp(1, 0, (u - 0.82) / 0.18) });
     }
     const a = ghost.animate(frames, { duration: 720, easing: "linear", fill: "forwards" });
-    a.onfinish = a.oncancel = () => { ghost.remove(); done(); };
+    // страховка, как у барабана цен: если кадры не идут (Telegram свёрнут), finish может не прийти —
+    // призрак остался бы в DOM, а счётчик корзины не обновился бы
+    let landed = false;
+    const land = () => { if (landed) return; landed = true; clearTimeout(t); ghost.remove(); done(); };
+    const t = setTimeout(land, 720 + 400);
+    a.onfinish = a.oncancel = land;
   }
   function pulse(el) {
     if (!el || reduced() || !el.animate) return;
@@ -370,5 +447,7 @@ window.Motion = (() => {
     el.classList.toggle(cls, now);
   }
 
-  return { reduced, spring, rubber, morph, glide, thumbs, captureThumbs, roll, captureRolls, applyRolls, fly, pulse, parallax, ambient, reveal, tilt, heroSwap, replay, clamp, lerp, hasView };
+  // onTick — приложение подставляет щелчок виброотклика (Telegram HapticFeedback.selectionChanged)
+  const api = { reduced, spring, rubber, morph, glide, thumbs, captureThumbs, roll, captureRolls, applyRolls, fly, pulse, parallax, ambient, reveal, tilt, heroSwap, replay, clamp, lerp, hasView, onTick: null };
+  return api;
 })();

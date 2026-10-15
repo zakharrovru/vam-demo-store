@@ -36,6 +36,23 @@
   const desktop = matchMedia("(min-width: 900px)");
   const debug = new URLSearchParams(location.search).has("debug");
 
+  // ---------- без масштабирования ----------
+  // meta viewport (maximum-scale=1, user-scalable=no) и touch-action в CSS закрывают Android и большинство WebView;
+  // iOS игнорирует user-scalable — там гасим жесты щипка (gesture*) и двойной тап. Прокрутку и шторку не трогаем:
+  // touchmove не перехватывается, а двойной тап гасится только вне полей и кнопок (иначе «+ +» в корзине терял бы второе нажатие).
+  (() => {
+    const editable = (t) => !!(t && t.closest && t.closest("input, textarea, select, [contenteditable]"));
+    const control = (t) => !!(t && t.closest && t.closest("button, a, label, input, textarea, select, [role=button], [data-act]"));
+    ["gesturestart", "gesturechange", "gestureend"].forEach((type) => document.addEventListener(type, (e) => { if (e.cancelable) e.preventDefault(); }, { passive: false }));
+    let lastEnd = 0;
+    document.addEventListener("touchend", (e) => {
+      const now = Date.now(), quick = now - lastEnd < 300;
+      lastEnd = now;
+      if (quick && e.cancelable && !e.touches.length && !control(e.target)) e.preventDefault();
+    }, { passive: false });
+    document.addEventListener("dblclick", (e) => { if (!editable(e.target) && e.cancelable) e.preventDefault(); }, { passive: false });
+  })();
+
   // Демо-режим: витрина публичная, но заказы магазином не обрабатываются
   if (cfg.DEMO) {
     const b = document.createElement("p");
@@ -43,6 +60,10 @@
     b.textContent = "Демонстрация · заказы не обрабатываются магазином";
     document.querySelector("#head .wrap").prepend(b);
   }
+  // плашка видна только в шапке каталога — в оформлении и на экране «Заказ отправлен» тоже говорим, что это демо,
+  // иначе «Менеджер свяжется в течение 15 минут» обещает то, чего не будет
+  const DEMO_NOTE = cfg.DEMO ? "<b>Демонстрация: заказы не обрабатываются магазином.</b> " : "";
+  const DEMO_DONE = "Это демонстрация — магазин не обрабатывает заказы, менеджер не свяжется.";
 
   const shop = { name: cfg.SHOP_NAME || "Магазин", manager: String(cfg.MANAGER_USERNAME || "").replace(/^@/, ""), phone: cfg.PHONE || "",
     currency: "RUB", rate: 0, cbr: 0, rateDate: "", rateSource: "" };
@@ -94,6 +115,12 @@
     sel() { if (tgAt("6.1")) try { tg.HapticFeedback.selectionChanged(); } catch {} },
     tap(k = "light") { if (tgAt("6.1")) try { tg.HapticFeedback.impactOccurred(k); } catch {} },
     note(t) { if (tgAt("6.1")) try { tg.HapticFeedback.notificationOccurred(t); } catch {} },
+  };
+  // барабан цены щёлкает на каждой цифре: в Telegram — selectionChanged, в браузере Android — короткая вибрация
+  M.onTick = () => {
+    if (inTelegram) hap.sel();
+    // вибрация в браузере разрешена только после жеста пользователя — иначе Chrome сыплет предупреждениями
+    else if (navigator.vibrate && matchMedia("(pointer: coarse)").matches && navigator.userActivation?.hasBeenActive) try { navigator.vibrate(3); } catch {}
   };
   const ICON = {
     x: `<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 1l10 10M11 1 1 11"/></svg>`,
@@ -439,7 +466,7 @@
   }
   function contactManager(it) {
     if (!shop.manager) return shop.phone ? (location.href = `tel:${shop.phone.replace(/[^\d+]/g, "")}`) : toast("Контакт менеджера не настроен");
-    const text = it ? `Здравствуйте! Интересует: ${P(it).title} ${P(it).flags} — ${money(it.price)}` : "Здравствуйте! Хочу проконсультироваться.";
+    const text = it ? `Здравствуйте! Интересует: ${P(it).title}${P(it).flags ? " " + P(it).flags : ""} — ${money(it.price)}` : "Здравствуйте! Хочу проконсультироваться.";
     openLink(`https://t.me/${shop.manager}?text=${encodeURIComponent(text)}`);
   }
 
@@ -1318,7 +1345,7 @@
       document.body.classList.add("sheet-open");
       document.documentElement.style.overflow = "hidden";
       OUTSIDE.forEach((s) => { const el = $(s); if (el) el.inert = true; });
-      if (tgAt("7.7")) try { tg.disableVerticalSwipes(); } catch {}
+      lockSwipes();
       sh.origin = from && ctx.type === "product" ? { id: ctx.id, tile: from } : null;
       sheetIn(from);
       setTimeout(() => sheet.focus({ preventScroll: true }), 60);
@@ -1338,7 +1365,7 @@
     document.body.classList.remove("sheet-open");
     document.documentElement.style.overflow = "";
     OUTSIDE.forEach((s) => { const el = $(s); if (el) el.inert = false; });
-    if (tgAt("7.7")) try { tg.enableVerticalSwipes(); } catch {}
+    lockSwipes(); // свайпы остаются выключенными: шторку и страницу тянут пальцем, Telegram не должен сворачиваться
     if (lastFocus && lastFocus !== document.body && document.contains(lastFocus) && !sheet.contains(lastFocus)) try { lastFocus.focus({ preventScroll: true }); } catch {}
     else $("#view").focus({ preventScroll: true });
     updateBack();
@@ -1731,7 +1758,7 @@
         <div class="group-label">Комментарий</div>
         <div class="fields"><textarea name="comment" rows="2" placeholder="Удобное время, вопросы…" aria-label="Комментарий"></textarea></div>
         <div class="err" id="formErr" role="alert" hidden></div>
-        <p class="note">Оплата при получении${eq ? ` — ${eq} ${rateCaption()}` : ""}. Менеджер свяжется для подтверждения${shop.phone ? ` · ${esc(shop.phone)}` : ""}.</p>
+        <p class="note">${DEMO_NOTE}Оплата при получении${eq ? ` — ${eq} ${rateCaption()}` : ""}. Менеджер свяжется для подтверждения${shop.phone ? ` · ${esc(shop.phone)}` : ""}.</p>
         <div class="actions tg-hide"><button class="buy" type="submit">Отправить заказ · ${money(total)}</button></div>
         <div class="sheet-end"></div>
       </form>`;
@@ -1756,7 +1783,7 @@
         <div class="group-label">Комментарий</div>
         <div class="fields"><textarea name="comment" rows="2" placeholder="Бюджет, сроки, вопросы…" aria-label="Комментарий"></textarea></div>
         <div class="err" id="formErr" role="alert" hidden></div>
-        <p class="note">Это не заказ: менеджер свяжется, чтобы уточнить детали${shop.phone ? ` · ${esc(shop.phone)}` : ""}.</p>
+        <p class="note">${DEMO_NOTE}Это не заказ: менеджер свяжется, чтобы уточнить детали${shop.phone ? ` · ${esc(shop.phone)}` : ""}.</p>
         <div class="actions tg-hide"><button class="buy" type="submit">Отправить заявку</button></div>
         <div class="sheet-end"></div>
       </form>`;
@@ -1779,9 +1806,11 @@
     el.focus();
     hap.note("error");
   }
+  let mainBusy = false; // на MainButton крутится индикатор: setParams его не снимает, нужен hideProgress (см. syncMain)
   function setBusy(form, busy, label) {
     const btn = $("button[type=submit]", form);
     if (btn) { btn.disabled = busy; btn.textContent = busy ? "Отправляем…" : label; }
+    mainBusy = busy && inTelegram;
     if (inTelegram) try { busy ? (tg.MainButton.showProgress(false), tg.MainButton.disable()) : (tg.MainButton.hideProgress(), tg.MainButton.enable()); } catch {}
   }
   async function post(payload) {
@@ -1859,7 +1888,7 @@
     render();
     hap.note("success");
     const eq = rubEq(total);
-    openSheet(doneHTML("Заказ отправлен", "Менеджер свяжется с вами в течение 15 минут.", [
+    openSheet(doneHTML("Заказ отправлен", cfg.DEMO ? DEMO_DONE : "Менеджер свяжется с вами в течение 15 минут.", [
       ["Номер заказа", `#${esc(orderId)}`],
       ["Товары", order.items.map((x) => `${esc(x.title)}${x.qty > 1 ? ` × ${x.qty}` : ""}`).join("<br>")],
       ["Получение", `${esc(delivery)}${address ? `<br>${esc(address)}` : ""}`],
@@ -1889,7 +1918,7 @@
     const date = new Date().toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
     store.set("orders", [{ id, date, request: fd.request, comment: fd.comment }, ...store.get("orders", [])].slice(0, 50));
     hap.note("success");
-    openSheet(doneHTML("Заявка отправлена", "Менеджер найдёт товар и свяжется с вами.", [
+    openSheet(doneHTML("Заявка отправлена", cfg.DEMO ? DEMO_DONE : "Менеджер найдёт товар и свяжется с вами.", [
       ["Номер заявки", `#${esc(id)}`], ["Что привезти", esc(fd.request)],
     ]), { type: "done" });
   }
@@ -1912,6 +1941,8 @@
       const it = find(ctx.id), l = it && cartLine(it.id);
       if (it) m = l ? { text: `В корзине (${l.qty}) · Оформить`, fn: goCart } : { text: `${inStock(it) ? "В корзину" : "Предзаказать"} · ${money(it.price)}`, fn: () => addToCart(it.id) };
     } else if (ctx && ctx.type === "checkout") {
+      // заказ принят и корзина уже пуста — шторку сейчас сменит «Готово»; не показываем «Отправить заказ · $0»
+      if (!cartRows().some((r) => r.it)) return;
       m = { text: `Отправить заказ · ${money(cartTotal())}`, fn: () => { const f = $("#orderForm"); if (f) submitOrder(f); } };
     } else if (ctx && ctx.type === "request") {
       m = { text: "Отправить заявку", fn: () => { const f = $("#reqForm"); if (f) submitRequest(f); } };
@@ -1924,6 +1955,8 @@
     }
     mainFn = m && m.fn;
     try {
+      // после успешной отправки: иначе индикатор остаётся и на «Готово», и на всех следующих кнопках
+      if (mainBusy && !submitting) { mainBusy = false; tg.MainButton.hideProgress(); }
       if (m) tg.MainButton.setParams({ text: m.text, is_visible: true, is_active: true, color: "#0071e3", text_color: "#ffffff" });
       else tg.MainButton.hide();
     } catch {}
@@ -2191,28 +2224,56 @@
     const bg = dark ? "#000000" : "#f5f5f7";
     $('meta[name="theme-color"]').content = bg;
     if (inTelegram) {
+      // шапка, фон и нижняя панель Telegram — цвета витрины: в полноэкранном режиме нет «рамок» другого цвета
       try { if (tgAt("6.1")) { tg.setHeaderColor(bg); tg.setBackgroundColor(bg); } } catch {}
-      try { if (tgAt("7.10") && tg.setBottomBarColor) tg.setBottomBarColor(dark ? "#161618" : "#f5f5f7"); } catch {}
+      try { if (tgAt("7.10") && tg.setBottomBarColor) tg.setBottomBarColor(bg); } catch {}
     }
   }
+  // отступы: SDK (Bot API 8.0+) сам пишет --tg-safe-area-inset-* и --tg-content-safe-area-inset-* в :root,
+  // CSS складывает их (styles.css, --safe-top/--safe-bottom); здесь — те же суммы для старых версий SDK + класс полноэкранного режима
   function applyInsets() {
     if (!inTelegram) return;
     const s = tg.safeAreaInset || {}, c = tg.contentSafeAreaInset || {};
     document.documentElement.style.setProperty("--tg-top", `${(s.top || 0) + (c.top || 0)}px`);
     document.documentElement.style.setProperty("--tg-bottom", `${(s.bottom || 0) + (c.bottom || 0)}px`);
+    document.body.classList.toggle("tg-fullscreen", !!tg.isFullscreen);
     onScroll();
+  }
+  function lockSwipes() { if (tgAt("7.7")) try { tg.disableVerticalSwipes(); } catch {} }
+  // полноэкранный режим без рамок — только на телефонах (на ПК и в веб-версии окно и так своё)
+  const tgMobile = inTelegram && /^(ios|android)$/i.test(String(tg.platform || ""));
+  function goFullscreen() {
+    if (!tgMobile || !tgAt("8.0") || typeof tg.requestFullscreen !== "function" || tg.isFullscreen) return;
+    try { tg.requestFullscreen(); } catch {}
+  }
+  function lockPortrait() {
+    if (!tgMobile || !tgAt("8.0") || typeof tg.lockOrientation !== "function") return;
+    if (innerWidth > innerHeight) return; // lockOrientation фиксирует текущую ориентацию — «боком» не фиксируем
+    try { tg.lockOrientation(); } catch {}
+  }
+  let insetT;
+  function onViewport() {
+    applyInsets();
+    clearTimeout(insetT);
+    insetT = setTimeout(() => { M.glide($("#tabbar")); M.thumbs($("#cats")); }, 150);
   }
 
   applyTheme();
   if (inTelegram) {
     document.body.classList.add("tg");
-    tg.ready();
-    tg.expand();
+    try { tg.ready(); } catch {}
+    try { tg.expand(); } catch {}
+    goFullscreen();
+    lockSwipes();
+    lockPortrait();
     try { tg.BackButton.onClick(backAction); } catch {}
     try { tg.MainButton.onClick(() => mainFn && mainFn()); } catch {}
     tg.onEvent("themeChanged", applyTheme);
     tg.onEvent("safeAreaChanged", applyInsets);
     tg.onEvent("contentSafeAreaChanged", applyInsets);
+    tg.onEvent("fullscreenChanged", onViewport);
+    tg.onEvent("fullscreenFailed", (e) => { if (debug) console.debug("[tg] fullscreenFailed", e && e.error); });
+    tg.onEvent("viewportChanged", (e) => { if (!e || e.isStateStable !== false) onViewport(); });
     applyInsets();
   } else {
     matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);

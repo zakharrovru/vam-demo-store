@@ -36,8 +36,13 @@
   --r-tile: 18px;
   --nav-h: 44px;
   --tab-h: 50px;
-  --safe-top: max(env(safe-area-inset-top, 0px), var(--tg-top, 0px));
-  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-bottom, 0px));
+  /* отступы: в Telegram SDK сам выставляет --tg-safe-area-inset-* (вырез/статус-бар) и --tg-content-safe-area-inset-*
+     (кнопки «Закрыть» / «⋯» в полноэкранном режиме); --tg-top/--tg-bottom — те же суммы из JS для старых версий SDK;
+     в браузере — env(safe-area-inset-*) */
+  --safe-top: max(env(safe-area-inset-top, 0px), calc(var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px)), var(--tg-top, 0px));
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), calc(var(--tg-safe-area-inset-bottom, 0px) + var(--tg-content-safe-area-inset-bottom, 0px)), var(--tg-bottom, 0px));
+  --safe-left: max(env(safe-area-inset-left, 0px), var(--tg-safe-area-inset-left, 0px));
+  --safe-right: max(env(safe-area-inset-right, 0px), var(--tg-safe-area-inset-right, 0px));
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   color-scheme: light;
@@ -78,7 +83,13 @@
 html { background: var(--canvas); }
 html, body { margin: 0; color: var(--ink); font: 400 15px/1.4 var(--font); letter-spacing: -.01em; -webkit-font-smoothing: antialiased; font-optical-sizing: auto; text-rendering: optimizeLegibility; }
 body { background: var(--canvas); padding-top: calc(var(--nav-h) + var(--safe-top)); min-height: 100vh; }
-button, input, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
+button, input, textarea, select { font: inherit; color: inherit; letter-spacing: inherit; }
+/* без масштабирования: щипок и двойной тап не зумят (плюс meta viewport и обработчики в app.js);
+   прокрутка по обеим осям и перетаскивание шторки остаются */
+html, body { touch-action: pan-x pan-y; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+button, a, input, textarea, select, label, [role="button"] { touch-action: manipulation; }
+/* iOS увеличивает страницу при фокусе на поле со шрифтом меньше 16 px */
+input, select, textarea { font-size: max(16px, 1em); }
 button { cursor: pointer; }
 button:disabled { cursor: default; }
 svg { display: block; }
@@ -97,7 +108,7 @@ main:focus, .sheet:focus { outline: none; }
 /* ---------- навбар (единственное «стекло») ---------- */
 .nav { position: fixed; z-index: 25; top: 0; left: 0; right: 0; padding-top: var(--safe-top); background: transparent;
   transition: background-color .25s var(--ease), box-shadow .25s var(--ease); }
-.nav-inner { height: var(--nav-h); display: grid; grid-template-columns: 1fr minmax(0, auto) 1fr; align-items: center; padding: 0 8px; max-width: 1100px; margin: 0 auto; }
+.nav-inner { height: var(--nav-h); display: grid; grid-template-columns: 1fr minmax(0, auto) 1fr; align-items: center; padding: 0 calc(8px + var(--safe-right)) 0 calc(8px + var(--safe-left)); max-width: 1100px; margin: 0 auto; }
 .nav-side { display: flex; align-items: center; min-width: 0; }
 .nav-side.right { justify-content: flex-end; }
 .nav-title { font: 600 17px/1.2 var(--font); letter-spacing: -.02em; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 56vw;
@@ -531,12 +542,19 @@ main { padding-bottom: calc(var(--tab-h) + var(--safe-bottom) + 40px); }
 .instant, .instant::before, .instant::after { transition: none !important; }
 
 /* цифровой барабан */
+/* Цифровой барабан цены — как колёса пикера в «Будильнике» iOS.
+   .odo-g — неподвижная цифра (держит ширину и видна в покое), .odo-w — цилиндр из 5 ячеек на время прокрутки;
+   ячейкам motion.js задаёт translateY/rotateX/opacity каждый кадр. */
 .odo { display: inline-flex; white-space: nowrap; vertical-align: top; }
-.odo-d { display: inline-block; overflow: hidden; vertical-align: top;
-  -webkit-mask-image: linear-gradient(transparent, #000 22%, #000 78%, transparent); mask-image: linear-gradient(transparent, #000 22%, #000 78%, transparent); }
-.odo-s { display: flex; flex-direction: column; transition: transform var(--dur-3) var(--spring-smooth); transition-delay: calc(var(--k, 0) * 28ms); }
-.odo-s > span { display: block; text-align: center; }
-.odo, .odo span { font-size: inherit !important; font-weight: inherit !important; color: inherit !important; letter-spacing: inherit; }
+.odo-d { position: relative; display: inline-block; vertical-align: top; }
+.odo-g { display: block; text-align: center; }
+.odo-w { position: absolute; left: -2px; right: -2px; display: none; perspective: 240px; transform-style: preserve-3d; pointer-events: none;
+  -webkit-mask-image: linear-gradient(transparent, #000 25%, #000 75%, transparent); mask-image: linear-gradient(transparent, #000 25%, #000 75%, transparent); }
+.odo-w > span { position: absolute; left: 0; right: 0; top: 0; text-align: center; backface-visibility: hidden; will-change: transform, opacity; }
+.odo-d.spin .odo-w { display: block; }
+.odo-d.spin .odo-g { visibility: hidden; }
+.odo, .odo span { font-size: inherit !important; font-weight: inherit !important; color: inherit !important; letter-spacing: 0; }
+.odo > span { margin-right: var(--ls, 0); }
 .odo-new { animation: fade-in var(--dur-2) var(--spring-smooth); }
 
 /* общий элемент «плитка → герой» и полёт в корзину */
