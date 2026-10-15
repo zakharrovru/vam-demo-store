@@ -543,7 +543,14 @@ main { padding-bottom: calc(var(--tab-h) + var(--safe-bottom) + 40px); }
 
 /* цифровой барабан */
 /* Цифры цены во время прокрутки — NumberFlow (vendor/number-flow.mjs): колёса цифр с маской сверху/снизу */
-number-flow { font-variant-numeric: tabular-nums; --number-flow-mask-height: .22em; --number-flow-mask-width: .4em; }
+number-flow { font-variant-numeric: tabular-nums; --number-flow-mask-height: .2em; --number-flow-mask-width: .4em;
+  /* Маска NumberFlow собрана из round()/многослойных -webkit-mask — в WebView Telegram на iOS она не применяется,
+     и колёса цифр видны целиком. Жёсткая обрезка по строке работает везде; по горизонтали оставляем запас,
+     чтобы не резать появляющиеся разряды. translateZ — отдельный слой, чтобы обрезались и анимируемые цифры. */
+  clip-path: inset(0 -0.6em); -webkit-clip-path: inset(0 -0.6em); transform: translateZ(0);
+  /* своё мягкое затухание сверху/снизу: один линейный градиент iOS понимает всегда */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16%, #000 84%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 16%, #000 84%, transparent 100%); }
 
 /* общий элемент «плитка → герой» и полёт в корзину */
 .morph { position: fixed; inset: 0; z-index: 55; pointer-events: none; contain: layout style; }
