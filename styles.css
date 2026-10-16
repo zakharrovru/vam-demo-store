@@ -27,6 +27,7 @@
   --up: #c4161c;
   --up-bg: #fde8e8;
   --wait: #a35700;
+  --new: #b64400;             /* «Новинка» — как у Apple Store, AA на белом */
   --badge: #d70015;
   --heart: #e0245e;
   --shadow: 0 1px 2px rgba(26, 26, 40, .04), 0 8px 24px rgba(26, 26, 40, .07);
@@ -72,6 +73,7 @@
   --up: #ff6961;
   --up-bg: rgba(255, 69, 58, .16);
   --wait: #ffb340;
+  --new: #ff9f0a;
   --heart: #ff375f;
   --shadow: 0 0 0 1px rgba(255, 255, 255, .05);
   --bar: rgba(22, 22, 24, .8);
@@ -734,3 +736,18 @@ img.fly { object-fit: cover; border-radius: 16px; }
 
 /* Плашка демо-режима над большим заголовком */
 .demo-badge { display: inline-flex; margin: 0 0 6px; padding: 4px 10px; border-radius: 999px; background: var(--fill); color: var(--ink-2); font-size: 12px; font-weight: 600; letter-spacing: -.01em; }
+
+/* ---------- находимость: «Новинка», «Бренды», группы моделей в разделе ---------- */
+.card .new-tag { font-size: 12px; font-weight: 600; color: var(--new); letter-spacing: -.01em; }
+.s-brands .pills { padding-top: 4px; padding-left: 20px; padding-right: 20px; }
+.mgroups { padding-top: 6px; }
+.mgroup { margin-top: 14px; }
+.mg-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 20px; }
+.mg-head h2 { margin: 0; font: 700 20px/1.2 var(--font-display); letter-spacing: -.025em; }
+.mg-head h2 span { color: var(--ink-3); font-weight: 600; font-size: 17px; font-variant-numeric: tabular-nums; }
+.mgroup .grid { padding-top: 6px; padding-bottom: 6px; }
+@media (min-width: 900px) {
+  .mg-head { padding: 0 20px; }
+  .brand-pills { flex-wrap: wrap; overflow: visible; }
+  .s-new .rail-more, .b-shelf .rail-more { display: none; } /* на широком экране полка — сетка, «Все» есть в заголовке */
+}

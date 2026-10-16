@@ -70,7 +70,7 @@
   const shop = { name: cfg.SHOP_NAME || "Магазин", manager: String(cfg.MANAGER_USERNAME || "").replace(/^@/, ""), phone: cfg.PHONE || "",
     currency: "RUB", rate: 0, cbr: 0, rateDate: "", rateSource: "" };
   const state = {
-    items: [], groups: [], trending: [], searches: [], updatedAt: null, loaded: false, offline: false,
+    items: [], groups: [], trending: [], searches: [], arrivals: [], updatedAt: null, loaded: false, offline: false,
     route: { name: "home" }, q: "", searchMode: false, sort: "pop", stockOnly: false, tab: "catalog",
     f: { mem: new Set(), color: new Set(), cond: new Set(), sim: new Set(), min: null, max: null, brand: null, model: null },
   };
@@ -397,6 +397,21 @@
     }
     state.searches = Array.isArray(data.searches) && data.searches.length ? data.searches.map(String).slice(0, 8) : SEARCHES;
   }
+  // «Поступило сегодня»: arrivals с бэкенда (first_seen за 48 ч, новые выше) и new:true у товара.
+  // Нет поля arrivals (локальный catalog.json) — демо: 12 самых свежих id из тех, что в наличии.
+  const newIds = new Set();
+  function buildArrivals(data) {
+    newIds.clear();
+    if (Array.isArray(data.arrivals)) state.arrivals = data.arrivals.map(String).filter((id) => byId.has(id)).map(find);
+    else {
+      // демо без бэкенда: по 2–3 свежих позиции из ходовых разделов, чтобы полка выглядела как реальные поступления
+      const DEMO_CATS = ["iPhone", "Samsung", "Apple Watch", "Наушники", "MacBook", "iPad и планшеты", "Dyson"];
+      state.arrivals = DEMO_CATS.flatMap((c) => state.items.filter((it) => it.category === c && inStock(it)).sort((a, b) => Number(b.id) - Number(a.id)).slice(0, 2)).slice(0, 12);
+    }
+    state.arrivals.forEach((it) => newIds.add(it.id));
+    state.items.forEach((it) => { if (it.new === true || /^(да|true|1)$/i.test(String(it.new ?? ""))) newIds.add(it.id); });
+  }
+  const isNew = (it) => newIds.has(it.id);
 
   // ---------- аналитика (анонимно) ----------
   const track = (() => {
@@ -444,12 +459,13 @@
 
   function cardHTML(it, i, extra = "", qt) {
     const p = P(it);
-    const st = statusText(it), meta = metaText(it), eq = rubEq(it.price);
+    const st = statusText(it), meta = metaText(it), eq = rubEq(it.price), nw = isNew(it);
     return `
-      <button class="card press ${extra}" data-id="${esc(it.id)}" style="--i:${i}" aria-label="${esc(`${p.title}, ${money(it.price)}${eq ? ` (${eq})` : ""}, ${st}${meta ? `, ${meta}` : ""}`)}">
+      <button class="card press ${extra}" data-id="${esc(it.id)}" style="--i:${i}" aria-label="${esc(`${nw ? "Новинка: " : ""}${p.title}, ${money(it.price)}${eq ? ` (${eq})` : ""}, ${st}${meta ? `, ${meta}` : ""}`)}">
         ${tileHTML(it)}
         ${favs.has(it.id) ? `<svg class="fav-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10Z"/></svg>` : ""}
         <div class="info" aria-hidden="true">
+          ${nw ? `<span class="new-tag">Новинка</span>` : ""}
           <span class="status ${inStock(it) ? "" : "wait"}">${esc(st)}</span>
           <span class="name">${hl(p.title, qt)} <span class="flags">${p.flags}</span></span>
           ${meta ? `<span class="meta">${esc(meta)}</span>` : ""}
@@ -507,9 +523,13 @@
     buildGroups(data);
     computePop();
     buildTrending(data);
+    buildArrivals(data);
     state.updatedAt = data.updated_at ? new Date(data.updated_at) : null;
     if (state.route.name === "cat" && !catGroup.has(state.route.cat)) state.route = { name: "home" };
     if (state.route.name === "group" && !state.groups.some((g) => g.name === state.route.group)) state.route = { name: "home" };
+    if (state.route.name === "arrivals" && !state.arrivals.length) state.route = { name: "home" };
+    _bm.clear();
+    if (state.route.name === "brand" && !state.items.some((it) => brandModel(it).brand === state.route.brand)) state.route = { name: "home" };
     state.loaded = true;
   }
 
@@ -600,6 +620,14 @@
       (m) => "iPhone " + m.replace(/^(\d+)E$/i, "$1e")],
     [(it) => it.category === "Samsung", /^(Z (?:Fold|Flip)\s?\d+(?: Ultra)?|S\d+\+?(?: Ultra| FE)?|A\d+S?|Note \d+(?: Ultra)?)/i,
       (m) => "Galaxy " + m.replace(/\s+/g, " ")],
+    [(it) => it.category === "Galaxy Watch", /^(fit\s?\d|watch\s?ultra\s?\d?(?!\d)|watch\s?\d+(?:\s?classic)?)/i,
+      (m) => "Galaxy " + upFirst(m.toLowerCase().replace(/^watch\s?/, "Watch ").replace(/^fit\s?/, "Fit").replace(/ultra\s?(\d)/, "ultra $1").trim()).replace(/ultra/, "Ultra").replace(/classic/, "Classic")],
+    [(it) => it.category === "iMac", /i?mac\s*(21[.,]5|24|27)/i, (m, r) => `iMac ${r[1].replace(",", ".")}″`],
+    [() => true, /робот-пылесос/i, () => "Роботы-пылесосы"],
+    [(it) => it.category === "Xiaomi", /^(redmi\s+note\s+\d+s?(?:\s+pro(?:\s+plus|\+|\s+max)?)?|redmi\s+\d+\w?|poco\s+[a-z]\d+(?:\s+pro)?|xiaomi\s+\d+\w?(?:\s+(?:pro|ultra|t))?|mi\s+\d+)/i,
+      (m) => m.replace(/\s+/g, " ").toLowerCase().replace(/(^|\s)([a-z])/g, (x, a, b) => a + b.toUpperCase()).replace(/(\d)s\b/, "$1S").replace(/^Poco/, "POCO").replace(/^Mi /, "Xiaomi Mi ")],
+    [(it) => it.category === "Honor и Huawei", /^(honor\s+(?:power\s*\d+|\d+(?:\s+pro)?)|huawei\s+pura\s*\d+(?:\s+pro)?)/i,
+      (m) => m.replace(/\s+/g, " ").toLowerCase().replace(/(^|\s)([a-z])/g, (x, a, b) => a + b.toUpperCase())],
     [() => true, /airpods\s*(pro\s*\d|pro|max\s*\d|max|\d)(\s*anc)?/i,
       (m, r) => "AirPods " + upFirst(r[1].replace(/\s+/g, " ").toLowerCase()) + (r[2] ? " ANC" : "")],
     [() => true, /buds\s*(core|\d+\s*(?:pro|fe)?)/i,
@@ -622,8 +650,9 @@
   function brandModel(it) {
     let r = _bm.get(it.id);
     if (r) return r;
-    const hay = `${it.category} ${it.name}`;
-    const b = BRANDS.find(([, re, cats]) => (cats && cats.includes(it.category)) || re.test(hay));
+    // сначала раздел бренда, потом название, и только потом имя раздела: в «Honor и Huawei» у Huawei Pura
+    // по имени раздела выходил Honor, а Roborock в разделе «Xiaomi» — Xiaomi
+    const b = BRANDS.find(([, , cats]) => cats && cats.includes(it.category)) || BRANDS.find(([, re]) => re.test(it.name)) || BRANDS.find(([, re]) => re.test(it.category));
     let model = "";
     for (const [when, re, fmt] of MODELS) {
       if (!when(it)) continue;
@@ -681,6 +710,60 @@
       `<button class="pill ${sel === v ? "on" : ""}" data-${key}="${esc(v)}" aria-pressed="${sel === v}">${esc(v)} <small>${n}</small></button>`).join("")}</div>`;
     return (brands.length > 1 ? row(brands, "brand", state.f.brand, "Бренд") : "") +
       (models.length > 1 && (brands.length <= 1 || state.f.brand) ? row(models, "model", state.f.model, "Модель") : "");
+  }
+  // ---------- бренды и модели по всему каталогу: «Бренды» на главной, страница бренда, «Популярные модели» в поиске ----------
+  let _agg = null;
+  function agg() {
+    if (_agg && _agg.items === state.items) return _agg;
+    const brands = new Map(), models = new Map();
+    state.items.forEach((it) => {
+      const { brand, model } = brandModel(it);
+      const b = brands.get(brand) || { count: 0, cats: new Map() };
+      b.count++; b.cats.set(it.category, (b.cats.get(it.category) || 0) + 1);
+      brands.set(brand, b);
+      if (!model) return;
+      const m = models.get(model) || { brand, count: 0, fresh: 0, sum: 0, cats: new Map() };
+      m.count++; m.cats.set(it.category, (m.cats.get(it.category) || 0) + 1);
+      if (inStock(it) && P(it).cond === "Новый") { m.fresh++; m.sum += it.price; }
+      models.set(model, m);
+    });
+    return (_agg = { items: state.items, brands, models });
+  }
+  // бренды для главной: по числу товаров, «Другие» и бренды из одного товара не показываем
+  const homeBrands = () => [...agg().brands.entries()].filter(([b, x]) => b !== "Другие" && x.count >= 2).sort((a, b) => b[1].count - a[1].count);
+  // популярные модели: новые в наличии × √средней цены (флагманы выше бюджетных линеек при равном выборе);
+  // не больше 2 на бренд в одной группе разделов — чтобы в ряду были и iPhone, и AirPods, и Galaxy, и Garmin; без мелочи (кабели, блоки)
+  const MODEL_SKIP = /^(Блок питания|Кабель|Роботы-пылесосы)$/;
+  function popularModels(n = 10) {
+    const per = new Map();
+    const w = (x) => x.fresh * Math.sqrt(x.sum / x.fresh);
+    return [...agg().models.entries()].filter(([m, x]) => !MODEL_SKIP.test(m) && x.fresh > 0)
+      .sort((a, b) => w(b[1]) - w(a[1]) || b[1].count - a[1].count)
+      .filter(([, x]) => {
+        const key = x.brand + "|" + groupOf(topCat(x.cats)), k = per.get(key) || 0;
+        per.set(key, k + 1);
+        return k < 2;
+      })
+      .slice(0, n);
+  }
+  const multiBrand = (cat) => new Set(catItems(cat).map((it) => brandModel(it).brand)).size > 1;
+  const topCat = (cats) => [...cats.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  // модель → её основной раздел с выбранной моделью (и брендом, если в разделе их несколько — иначе ряд моделей не виден)
+  function openModel(model, fromBrand = "") {
+    const x = agg().models.get(model);
+    if (!x) return;
+    const cat = topCat(x.cats);
+    go({ name: "cat", cat, from: groupOf(cat) || "", fromBrand }, { brand: multiBrand(cat) ? x.brand : null, model });
+  }
+  // бренд → страница бренда; если весь бренд в одном разделе (Garmin, Dyson, Kugoo) — сразу этот раздел
+  function openBrand(brand) {
+    const x = agg().brands.get(brand);
+    if (!x) return;
+    if (x.cats.size === 1) return openBrandCat(brand, topCat(x.cats), false);
+    go({ name: "brand", brand });
+  }
+  function openBrandCat(brand, cat, fromBrand = true) {
+    go({ name: "cat", cat, from: groupOf(cat) || "", fromBrand: fromBrand ? brand : "" }, { brand: multiBrand(cat) ? brand : null, model: null });
   }
   const filtersActive = () => FILTERS.some(([k]) => state.f[k].size) || state.f.min != null || state.f.max != null || !!state.f.brand || !!state.f.model;
   function resetFilters() { FILTERS.forEach(([k]) => state.f[k].clear()); state.f.min = state.f.max = null; state.f.brand = state.f.model = null; }
@@ -773,7 +856,7 @@
     if (inTelegram) { try { need ? tg.BackButton.show() : tg.BackButton.hide(); } catch {} }
     const b = $("#navBack");
     b.hidden = inTelegram || !!sheetCtx || !(state.tab === "catalog" && state.route.name !== "home" && !isSearching());
-    $("#navBackText").textContent = state.route.name === "cat" && state.route.from ? state.route.from : shop.name;
+    $("#navBackText").textContent = state.route.name === "cat" && (state.route.fromBrand || state.route.from) ? state.route.fromBrand || state.route.from : shop.name;
     armHistory(need);
   }
   // кнопка «Назад» браузера / жест Android на обычном сайте: пока открыт подэкран или шторка, в истории лежит
@@ -793,6 +876,7 @@
   function backAction() {
     if (sheetCtx) return closeSheet();
     if (state.tab === "catalog" && isSearching()) return cancelSearch();
+    if (state.tab === "catalog" && state.route.name === "cat" && state.route.fromBrand) return go({ name: "brand", brand: state.route.fromBrand });
     if (state.tab === "catalog" && state.route.name === "cat" && state.route.from) return go({ name: "group", group: state.route.from });
     if (state.tab === "catalog" && state.route.name !== "home") return go({ name: "home" });
   }
@@ -824,6 +908,8 @@
     else if (isSearching()) renderSearch();
     else if (state.route.name === "group") renderGroup();
     else if (state.route.name === "cat") renderCategory();
+    else if (state.route.name === "brand") renderBrand();
+    else if (state.route.name === "arrivals") renderArrivals();
     else renderHome();
     if (intro) {
       introDone = true;
@@ -916,6 +1002,7 @@
   function activeGroup() {
     if (state.route.name === "group") return state.route.group;
     if (state.route.name === "cat") return groupOf(state.route.cat);
+    if (state.route.name === "brand" || state.route.name === "arrivals") return "";
     return "Все";
   }
 
@@ -962,6 +1049,8 @@
     const feat = featured.find(inStock) || cheaper.find(inStock) || state.trending[0] || state.items.find(inStock) || state.items[0];
     const eyebrow = featured.includes(feat) ? "Выбор магазина" : delta(feat) < 0 ? "Выгоднее всего сегодня" : "Популярное сейчас";
     const trending = state.trending.filter((it) => it !== feat);
+    const arrivals = state.arrivals;
+    const brands = homeBrands();
     const fp = feat && P(feat);
     const seen = store.get("seen", []).map(find).filter(Boolean);
     const eq = feat && rubEq(feat.price);
@@ -984,6 +1073,16 @@
           <span class="status ${inStock(feat) ? "" : "wait"}">${esc(statusText(feat))}</span>
         </div>
       </button>` : ""}
+      ${arrivals.length ? `
+      <section class="shelf s-new" aria-labelledby="sh-new">
+        ${shelfHead("sh-new", "Поступило <span>сегодня</span>", arrivals.length > 8 ? `<button class="more" data-act="arrivals">Все ${arrivals.length} ›</button>` : "")}
+        ${rail(arrivals.slice(0, 8), false, arrivals.length > 8 ? railMore(`Все ${arrivals.length}`, 'data-act="arrivals"') : "")}
+      </section>` : ""}
+      ${brands.length > 1 ? `
+      <section class="shelf s-brands" aria-labelledby="sh-brands">
+        ${shelfHead("sh-brands", "Бренды")}
+        <div class="pills brand-pills" role="list">${brands.map(([b, x]) => `<button class="pill press" role="listitem" data-ob="${esc(b)}" aria-label="${esc(`${b}: ${goods(x.count)}`)}">${esc(b)} <small>${x.count}</small></button>`).join("")}</div>
+      </section>` : ""}
       ${trending.length ? `
       <section class="shelf" aria-labelledby="sh-trend">
         ${shelfHead("sh-trend", "Популярное <span>сейчас</span>")}
@@ -1030,6 +1129,51 @@
       ${top.length ? `<section class="shelf" aria-labelledby="sh-gtop">${shelfHead("sh-gtop", "Популярное <span>в разделе</span>")}${rail(top, true)}</section>` : ""}`;
   }
 
+  // страница бренда: модели сверху, ниже — товары бренда по разделам (полки «iPhone», «Apple Watch»…)
+  function renderBrand() {
+    const b = state.route.brand, x = agg().brands.get(b);
+    if (!x) { state.route = { name: "home" }; return renderHome(); }
+    const items = state.items.filter((it) => brandModel(it).brand === b);
+    const cats = [...x.cats.entries()].sort((p, q) => q[1] - p[1]);
+    setHead(b, `${goods(items.length)} · ${cats.length} ${plural(cats.length, "раздел", "раздела", "разделов")}`);
+    // модели — в порядке разделов, внутри раздела — привычный порядок (поколения, линейки)
+    const seen = new Set(), models = [];
+    cats.forEach(([c]) => {
+      const m = new Map();
+      items.forEach((it) => { if (it.category !== c) return; const md = brandModel(it).model; if (md && !seen.has(md)) m.set(md, (m.get(md) || 0) + 1); });
+      sortModels([...m.entries()]).forEach(([md]) => { seen.add(md); models.push([md, agg().models.get(md).count]); });
+    });
+    const sec = (c, n, i) => shelfHead(`sh-b${i}`, `${esc(c)} <span>${n}</span>`, `<button class="more" data-ob-cat="${esc(c)}">Все ›</button>`)
+      + rail(sortList(items.filter((it) => it.category === c), "pop").slice(0, 8), false, n > 8 ? railMore(`Все ${n}`, `data-ob-cat="${esc(c)}"`) : "");
+    $("#view").innerHTML = `
+      ${models.length > 1 ? `<div class="pills bm-row" role="group" aria-label="Модели">${models.map(([m, n]) => `<button class="pill" data-om="${esc(m)}">${esc(m)} <small>${n}</small></button>`).join("")}</div>` : ""}
+      ${cats.map(([c, n], i) => i < 2 ? `<section class="shelf b-shelf" aria-labelledby="sh-b${i}">${sec(c, n, i)}</section>` : lazySection(`b${i}`, () => sec(c, n, i), 360, "shelf b-shelf")).join("")}`;
+  }
+  function renderArrivals() {
+    const list = state.arrivals;
+    if (!list.length) { state.route = { name: "home" }; return renderHome(); }
+    setHead("Поступило сегодня", goods(list.length));
+    $("#view").innerHTML = `<div class="grid">${gridCards(list, null, true)}</div>`;
+    observeMore();
+  }
+  // крупный раздел без выбранной модели и фильтров — товары по моделям с заголовками, а не одной лентой;
+  // в каждой группе первые 4, «Все N ›» выбирает модель (как пилюля сверху)
+  const GROUP_MIN = 40, GROUP_SHOW = 4;
+  function modelGroupsHTML(list, base) {
+    const by = new Map();
+    list.forEach((it) => { const m = brandModel(it).model || ""; if (!by.has(m)) by.set(m, []); by.get(m).push(it); });
+    const order = sortModels([...by.entries()].filter(([m]) => m).map(([m, l]) => [m, l.length])).map(([m]) => m);
+    if (by.has("")) order.push("");
+    if (order.length < 2) return "";
+    const multi = new Set(base.map((it) => brandModel(it).brand)).size > 1;
+    const sec = (m, i) => {
+      const l = by.get(m), title = m || "Другие модели";
+      const more = m && l.length > GROUP_SHOW ? `<button class="more" data-mg="${esc(m)}"${multi ? ` data-mgb="${esc(brandModel(l[0]).brand)}"` : ""}>Все ${l.length} ›</button>` : "";
+      return `<div class="mg-head"><h2 id="mg${i}">${esc(title)} <span>${l.length}</span></h2>${more}</div>
+        <div class="grid">${l.slice(0, m ? GROUP_SHOW : 40).map((it, k) => cardHTML(it, k)).join("")}</div>`;
+    };
+    return order.map((m, i) => i < 4 ? `<section class="mgroup" aria-labelledby="mg${i}">${sec(m, i)}</section>` : lazySection(`mg${i}`, () => sec(m, i), 420, "mgroup")).join("");
+  }
   function toolbarHTML(searchMode) {
     const sorts = searchMode
       ? [["default", "Лучшие"], ["asc", "Дешевле"], ["desc", "Дороже"], ["new", "Новые"]]
@@ -1063,6 +1207,14 @@
     const base = catItems(c);
     const list = sortList(applyFilters(base), state.sort);
     setHead(c, filtersActive() || state.stockOnly ? `${goods(list.length)} из ${base.length}` : goods(base.length));
+    // группировка по моделям: «Популярные», без модели и фильтров (бренд и «В наличии» не мешают — группы просто меньше)
+    const plain = state.sort === "pop" && !state.f.model && !FILTERS.some(([k]) => state.f[k].size) && state.f.min == null && state.f.max == null;
+    const grouped = plain && list.length > GROUP_MIN ? modelGroupsHTML(list, base) : "";
+    if (grouped) {
+      page = { list: [], shown: 0, qt: null };
+      $("#view").innerHTML = `${brandBarHTML(base)}${toolbarHTML(false)}${filterBarHTML(base)}<div class="mgroups">${grouped}</div>`;
+      return;
+    }
     $("#view").innerHTML = `${brandBarHTML(base)}${toolbarHTML(false)}${filterBarHTML(base)}
       <div class="grid">${list.length
         ? gridCards(list, null, true)
@@ -1075,11 +1227,14 @@
     if (!state.q.trim()) {
       setHead("Поиск", "");
       const recent = store.get("recent", []);
+      const pm = popularModels(12);
       $("#view").innerHTML = `
         <div class="s-panel">
           ${recent.length ? `
           <div class="s-head"><h2>Недавние</h2><button data-act="clear-recent">Очистить</button></div>
           <div class="rows">${recent.map((r) => `<button class="row" data-q="${esc(r)}">${ICON.clock}<span>${esc(r)}</span></button>`).join("")}</div>` : ""}
+          ${pm.length ? `<div class="s-head"><h2>Популярные модели</h2></div>
+          <div class="chips">${pm.map(([m, x]) => `<button class="chip" data-om="${esc(m)}" aria-label="${esc(`${m}: ${goods(x.count)}`)}">${esc(m)}</button>`).join("")}</div>` : ""}
           <div class="s-head"><h2>Часто ищут</h2></div>
           <div class="chips">${state.searches.map((s) => `<button class="chip" data-q="${esc(s)}">${esc(s)}</button>`).join("")}</div>
           <div class="s-head"><h2>Разделы</h2><button data-act="all-cats">Все категории</button></div>
@@ -2088,9 +2243,11 @@
     window.scrollTo(0, 0);
   }
   function goCart() { closeSheet(); setTab("cart"); }
-  function go(route) {
+  // preset — выбранные бренд/модель при входе в раздел (из «Бренды», «Популярные модели», страницы бренда)
+  function go(route, preset) {
     if (isSearching()) exitSearch();
-    if (route.name === "cat" && routeCat() !== route.cat) { resetFilters(); state.sort = "pop"; }
+    if (route.name === "cat" && (routeCat() !== route.cat || preset)) { resetFilters(); state.sort = "pop"; }
+    if (route.name === "cat" && preset) { state.f.brand = preset.brand || null; state.f.model = preset.model || null; }
     state.route = route;
     state.tab = "catalog";
     markTabs();
@@ -2212,8 +2369,19 @@
       if (isSearching() && state.q.trim()) track.push("click_search", { q: state.q.trim(), item_id: card.dataset.id });
       return showProduct(card.dataset.id, { from: $(".tile", card) });
     }
-    const t = e.target.closest("[data-q], [data-cat], [data-group], [data-sort], [data-stock], [data-filter], [data-brand], [data-model], [data-act]");
+    const t = e.target.closest("[data-q], [data-cat], [data-group], [data-sort], [data-stock], [data-filter], [data-brand], [data-model], [data-om], [data-ob], [data-ob-cat], [data-mg], [data-act]");
     if (!t) return;
+    // бренд с главной, модель из поиска / страницы бренда, раздел бренда, «Все N» у группы модели
+    if (t.dataset.ob !== undefined) { hap.sel(); return openBrand(t.dataset.ob); }
+    if (t.dataset.om !== undefined) { hap.sel(); return openModel(t.dataset.om, state.route.name === "brand" && !isSearching() ? state.route.brand : ""); }
+    if (t.dataset.obCat !== undefined) { hap.sel(); return openBrandCat(state.route.brand, t.dataset.obCat); }
+    if (t.dataset.mg !== undefined) {
+      hap.sel();
+      if (t.dataset.mgb) state.f.brand = t.dataset.mgb;
+      state.f.model = t.dataset.mg;
+      render({ keepScroll: false });
+      return window.scrollTo(0, 0);
+    }
     if (t.dataset.q !== undefined) { hap.sel(); saveRecent(t.dataset.q); qInput.blur(); if (!state.searchMode) state.searchMode = true; return setQuery(t.dataset.q); }
     if (t.dataset.cat !== undefined) { hap.sel(); return openCat(t.dataset.cat, state.route.name === "group" ? state.route.group : ""); }
     if (t.dataset.group !== undefined) { hap.sel(); return go({ name: "group", group: t.dataset.group }); }
@@ -2231,6 +2399,7 @@
       case "all-cats": openAllCats(); break;
       case "clear-recent": store.set("recent", []); render(); break;
       case "clear-seen": store.set("seen", []); render(); break;
+      case "arrivals": hap.sel(); go({ name: "arrivals" }); break;
       case "more-grid": morePage(); break;
       case "f-reset": hap.sel(); resetFilters(); state.stockOnly = false; render(); break;
       case "request": openRequest(); break;
