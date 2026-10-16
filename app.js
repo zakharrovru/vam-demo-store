@@ -29,7 +29,9 @@
   } catch {}
   const M = window.Motion;
   const tg = window.Telegram && window.Telegram.WebApp;
-  const inTelegram = !!(tg && tg.initData);
+  // Внутри Telegram — если клиент сообщил платформу. initData бывает пустым (Mini App открыт кнопкой
+  // из клавиатуры бота), а полный экран и виброотклик нужны и там; initData — только для подписи заказов.
+  const inTelegram = !!(tg && (tg.initData || (tg.platform && tg.platform !== "unknown")));
   const tgAt = (v) => { try { return inTelegram && (!tg.isVersionAtLeast || tg.isVersionAtLeast(v)); } catch { return false; } };
   const $ = (s, root = document) => root.querySelector(s);
   const $$ = (s, root = document) => [...root.querySelectorAll(s)];
